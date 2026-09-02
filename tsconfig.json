@@ -8,8 +8,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "allowSyntheticDefaultImports": true,
-    "outDir": "./dist"
+    "allowSyntheticDefaultImports": true
   },
   "include": ["api/**/*", "server/src/**/*"]
 }
