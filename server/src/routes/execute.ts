@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import JSON5 from 'json5';
-import { getMongoClient } from '../db.js';
-import { parseToken } from './auth.js';
+import { getMongoClient } from '../db';
+import { parseToken } from './auth';
 
 const router = Router();
 
@@ -136,7 +136,7 @@ export function createExecuteRouter(): Router {
           try {
             const adminDb = mongoClient.db('admin');
             const dbsList = await adminDb.admin().listDatabases();
-            result = dbsList.databases.map(d => `${d.name.padEnd(28)} ${(d.sizeOnDisk / 1024 / 1024).toFixed(2)} MiB`).join('\n');
+            result = dbsList.databases.map(d => `${d.name.padEnd(28)} ${((d.sizeOnDisk || 0) / 1024 / 1024).toFixed(2)} MiB`).join('\n');
             message = `Found ${dbsList.databases.length} database(s) on Atlas`;
           } catch {
             result = `${activeDbName}    0.01 MiB\nmanideep_practice_app    0.02 MiB`;
@@ -392,7 +392,7 @@ export function createExecuteRouter(): Router {
           }
 
           case 'stats': {
-            result = await collection.stats();
+            result = await db.command({ collStats: collName });
             message = `Stats for collection "${collName}"`;
             break;
           }

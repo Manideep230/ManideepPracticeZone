@@ -9,5 +9,17 @@
     "build": "cd client && npm run build",
     "vercel-build": "cd client && npm run build",
     "install:all": "cd client && npm install && cd ../server && npm install"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "json5": "^2.2.3",
+    "mongodb": "^6.9.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
   }
 }

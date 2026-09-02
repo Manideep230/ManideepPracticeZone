@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
-import { getMongoClient } from '../db.js';
+import { getMongoClient } from '../db';
 
 const router = Router();
 const ADMIN_ROLL = '22KT1A4245';
@@ -62,9 +62,9 @@ export function createAuthRouter(): Router {
 
       // Ensure dropdown options exist
       const optionsColl = appDb.collection('options');
-      const opt = await optionsColl.findOne({ _id: 'dropdown_options' });
+      const opt = await optionsColl.findOne({ _id: 'dropdown_options' as any });
       if (!opt) {
-        await optionsColl.insertOne(DEFAULT_OPTIONS);
+        await optionsColl.insertOne(DEFAULT_OPTIONS as any);
       }
     } catch (e) {
       console.error('Error seeding default options/admin:', e);
@@ -76,15 +76,15 @@ export function createAuthRouter(): Router {
     try {
       const client = await getMongoClient();
       const optionsColl = client.db('manideep_practice_app').collection('options');
-      let opt = await optionsColl.findOne({ _id: 'dropdown_options' });
+      let opt: any = await optionsColl.findOne({ _id: 'dropdown_options' as any });
       if (!opt) opt = DEFAULT_OPTIONS;
       
       res.json({
         success: true,
         options: {
-          colleges: opt.colleges || DEFAULT_OPTIONS.colleges,
-          branches: opt.branches || DEFAULT_OPTIONS.branches,
-          years: opt.years || DEFAULT_OPTIONS.years
+          colleges: opt?.colleges || DEFAULT_OPTIONS.colleges,
+          branches: opt?.branches || DEFAULT_OPTIONS.branches,
+          years: opt?.years || DEFAULT_OPTIONS.years
         }
       });
     } catch {
@@ -299,7 +299,7 @@ export function createAuthRouter(): Router {
       const optionsColl = client.db('manideep_practice_app').collection('options');
 
       await optionsColl.updateOne(
-        { _id: 'dropdown_options' },
+        { _id: 'dropdown_options' as any },
         { $set: { colleges, branches, years, updatedAt: new Date() } },
         { upsert: true }
       );
