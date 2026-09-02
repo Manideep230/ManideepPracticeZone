@@ -815,6 +815,15 @@ app.use(express.json({ limit: '2mb' }));
 app.use('/api', router);
 app.use('/', router);
 
-export default function handler(req: any, res: any) {
+const handler = (req: any, res: any) => {
   return app(req, res);
+};
+
+export default handler;
+
+// CommonJS & Vercel serverless runtime interop
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = handler;
+  // @ts-ignore
+  module.exports.default = handler;
 }
