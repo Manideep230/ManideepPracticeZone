@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import JSON5 from 'json5';
-import { getMongoClient } from '../db';
-import { parseToken } from './auth';
+import { getMongoClient } from '../db.js';
+import { parseToken } from './auth.js';
 
 const router = Router();
 

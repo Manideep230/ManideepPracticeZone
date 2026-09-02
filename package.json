@@ -2,6 +2,7 @@
   "name": "manideep-practice-zone",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Interactive MongoDB Learning & Practice Platform",
   "scripts": {
     "dev:client": "cd client && npm run dev",

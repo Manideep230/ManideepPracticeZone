@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
-import { createAuthRouter } from './routes/auth';
-import { createExecuteRouter } from './routes/execute';
-import { createDatabaseRouter } from './routes/database';
+import { createAuthRouter } from './routes/auth.js';
+import { createExecuteRouter } from './routes/execute.js';
+import { createDatabaseRouter } from './routes/database.js';
 
 const app = express();
 

@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { getMongoClient } from '../db';
-import { parseToken } from './auth';
+import { getMongoClient } from '../db.js';
+import { parseToken } from './auth.js';
 
 export function createDatabaseRouter(): Router {
   const router = Router();

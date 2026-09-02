@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
-import { getMongoClient } from '../db';
+import { getMongoClient } from '../db.js';
 
 const router = Router();
 const ADMIN_ROLL = '22KT1A4245';
