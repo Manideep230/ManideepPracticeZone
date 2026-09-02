@@ -34,9 +34,8 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   // Option delete confirmation modal state
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'college' | 'branch' | 'year'; name: string } | null>(null);
 
-  // Admin Playground / Command Execution Stage State
   const [adminDbName, setAdminDbName] = useState('user_db_22kt1a4245');
-  const [adminCommand, setAdminCommand] = useState('// Admin MongoDB Shell Command Stage\nshow dbs');
+  const [adminCommand, setAdminCommand] = useState('show dbs');
   const [adminExecLoading, setAdminExecLoading] = useState(false);
   const [adminExecResult, setAdminExecResult] = useState<ExecutionResult | null>(null);
   const [pendingDeleteCmd, setPendingDeleteCmd] = useState<string | null>(null);
@@ -383,7 +382,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                 className="admin-textarea-editor"
                 value={adminCommand}
                 onChange={e => setAdminCommand(e.target.value)}
-                placeholder="Type any MongoDB command here e.g. show dbs, db.createCollection('test'), db.coll.find()..."
+                placeholder="Enter MongoDB command..."
                 rows={10}
               />
             </div>

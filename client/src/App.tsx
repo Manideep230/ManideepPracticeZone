@@ -27,7 +27,7 @@ function App() {
     fetchCollectionDocs,
   } = useMongoExecution(token);
 
-  const [editorValue, setEditorValue] = useState(`// Create a new collection in your persistent MongoDB Atlas database:\ndb.createCollection("allu")\n\n// Or insert a document directly:\n// db.allu.insertOne({ name: "Rahul", role: "Developer" })`);
+  const [editorValue, setEditorValue] = useState('db.createCollection("users")');
   const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([]);
 
   // Destructive command execution confirm modal state
