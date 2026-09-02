@@ -1,4 +1,4 @@
-import express, { Request, Response, Router } from 'express';
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
 import JSON5 from 'json5';
@@ -174,12 +174,10 @@ function parseValue(val: string): any {
   try { return JSON5.parse(val); } catch { return val; }
 }
 
-const app = express();
-app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+const router = express.Router();
 
 // 1. Options
-app.get('/api/options', async (_req: Request, res: Response) => {
+router.get('/options', async (_req: Request, res: Response) => {
   try {
     const client = await getMongoClient();
     const optionsColl = client.db('manideep_practice_app').collection('options');
@@ -200,7 +198,7 @@ app.get('/api/options', async (_req: Request, res: Response) => {
 });
 
 // 2. Sign Up
-app.post('/api/auth/signup', async (req: Request, res: Response) => {
+router.post('/auth/signup', async (req: Request, res: Response) => {
   try {
     const { rollNumber, mobileNumber, password, collegeName, branch, year } = req.body;
 
@@ -275,7 +273,7 @@ app.post('/api/auth/signup', async (req: Request, res: Response) => {
 });
 
 // 3. Sign In
-app.post('/api/auth/signin', async (req: Request, res: Response) => {
+router.post('/auth/signin', async (req: Request, res: Response) => {
   try {
     const { rollNumber, password } = req.body;
 
@@ -327,7 +325,7 @@ app.post('/api/auth/signin', async (req: Request, res: Response) => {
 });
 
 // 4. Session check
-app.get('/api/auth/me', async (req: Request, res: Response) => {
+router.get('/auth/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
   const session = parseToken(token);
@@ -367,7 +365,7 @@ app.get('/api/auth/me', async (req: Request, res: Response) => {
 });
 
 // 5. Admin options
-app.post('/api/admin/options', async (req: Request, res: Response) => {
+router.post('/admin/options', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
   const session = parseToken(token);
@@ -395,7 +393,7 @@ app.post('/api/admin/options', async (req: Request, res: Response) => {
 });
 
 // 6. Admin students
-app.get('/api/admin/students', async (req: Request, res: Response) => {
+router.get('/admin/students', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
   const session = parseToken(token);
@@ -417,7 +415,7 @@ app.get('/api/admin/students', async (req: Request, res: Response) => {
 });
 
 // 7. Execute MongoDB Command
-app.post('/api/execute', async (req: Request, res: Response) => {
+router.post('/execute', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
   const session = parseToken(token);
@@ -755,7 +753,7 @@ app.post('/api/execute', async (req: Request, res: Response) => {
 });
 
 // 8. Database collections explorer
-app.get('/api/collections', async (req: Request, res: Response) => {
+router.get('/collections', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
@@ -783,7 +781,7 @@ app.get('/api/collections', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/collections/:name', async (req: Request, res: Response) => {
+router.get('/collections/:name', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
@@ -806,9 +804,16 @@ app.get('/api/collections/:name', async (req: Request, res: Response) => {
 });
 
 // 9. Health Check
-app.get('/api/health', (_req, res) => {
+router.get('/health', (_req, res) => {
   res.json({ status: 'ok', storage: 'MongoDB Atlas', mode: 'Vercel Serverless Function' });
 });
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '2mb' }));
+
+app.use('/api', router);
+app.use('/', router);
 
 export default function handler(req: any, res: any) {
   return app(req, res);
