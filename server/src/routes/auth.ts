@@ -37,40 +37,6 @@ const DEFAULT_OPTIONS = {
 
 export function createAuthRouter(): Router {
 
-  // Seed default admin and options on startup
-  (async () => {
-    try {
-      const client = await getMongoClient();
-      const appDb = client.db('manideep_practice_app');
-      
-      // Ensure admin exists
-      const usersColl = appDb.collection('users');
-      const adminUser = await usersColl.findOne({ rollNumber: ADMIN_ROLL });
-      if (!adminUser) {
-        await usersColl.insertOne({
-          rollNumber: ADMIN_ROLL,
-          mobileNumber: '9999999999',
-          password: hashPassword(ADMIN_PASS),
-          collegeName: 'Admin Portal',
-          branch: 'CSE',
-          year: 'IV Year',
-          isAdmin: true,
-          userDbName: 'user_db_22kt1a4245',
-          createdAt: new Date()
-        });
-      }
-
-      // Ensure dropdown options exist
-      const optionsColl = appDb.collection('options');
-      const opt = await optionsColl.findOne({ _id: 'dropdown_options' as any });
-      if (!opt) {
-        await optionsColl.insertOne(DEFAULT_OPTIONS as any);
-      }
-    } catch (e) {
-      console.error('Error seeding default options/admin:', e);
-    }
-  })();
-
   // Public: Get Sign Up dropdown options
   router.get('/options', async (_req: Request, res: Response) => {
     try {
