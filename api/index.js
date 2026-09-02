@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
@@ -54,7 +55,7 @@ async function getMongoClient() {
       const usersColl = appDb.collection('users');
       await usersColl.createIndex({ rollNumber: 1 }, { unique: true });
       await usersColl.createIndex({ mobileNumber: 1 }, { unique: true });
-      
+
       const optionsColl = appDb.collection('options');
       const opt = await optionsColl.findOne({ _id: 'dropdown_options' });
       if (!opt) {
@@ -99,7 +100,7 @@ const DEFAULT_OPTIONS = {
 
 function parseMongoCommand(command) {
   let cmd = command.trim().replace(/;\s*$/, '');
-  
+
   const match = cmd.match(/^db\.(\w+)\.(\w+)\s*\(([\s\S]*)\)$/);
   if (match) {
     const [, collection, operation, argsStr] = match;
@@ -135,36 +136,36 @@ function parseChain(chainStr) {
 function parseArgs(argsStr) {
   const trimmed = argsStr.trim();
   if (!trimmed) return [];
-  
+
   const args = [];
   let depth = 0;
   let current = '';
   let inString = false;
   let stringChar = '';
-  
+
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i];
     const prev = i > 0 ? trimmed[i - 1] : '';
-    
+
     if (inString) {
       current += ch;
       if (ch === stringChar && prev !== '\\') inString = false;
       continue;
     }
-    
+
     if (ch === '"' || ch === "'") { inString = true; stringChar = ch; current += ch; continue; }
     if (ch === '{' || ch === '[' || ch === '(') { depth++; current += ch; continue; }
     if (ch === '}' || ch === ']' || ch === ')') { depth--; current += ch; continue; }
-    
+
     if (ch === ',' && depth === 0) {
       if (current.trim()) args.push(parseValue(current.trim()));
       current = '';
       continue;
     }
-    
+
     current += ch;
   }
-  
+
   if (current.trim()) args.push(parseValue(current.trim()));
   return args;
 }
@@ -182,7 +183,7 @@ router.get('/options', async (_req, res) => {
     const optionsColl = client.db('manideep_practice_app').collection('options');
     let opt = await optionsColl.findOne({ _id: 'dropdown_options' });
     if (!opt) opt = DEFAULT_OPTIONS;
-    
+
     res.json({
       success: true,
       options: {
@@ -338,7 +339,7 @@ router.get('/auth/me', async (req, res) => {
     const client = await getMongoClient();
     const usersColl = client.db('manideep_practice_app').collection('users');
     const user = await usersColl.findOne({ rollNumber: session.rollNumber });
-    
+
     if (!user) {
       res.status(401).json({ success: false, error: 'User not found' });
       return;
