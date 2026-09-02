@@ -1,27 +1,26 @@
-import express, { Request, Response } from 'express';
-import cors from 'cors';
-import crypto from 'crypto';
-import JSON5 from 'json5';
-import { MongoClient } from 'mongodb';
+const express = require('express');
+const cors = require('cors');
+const crypto = require('crypto');
+const JSON5 = require('json5');
+const { MongoClient } = require('mongodb');
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://manideepjuvvala215_db_user:aeWhCDDKOpXeGg8b@cluster0.aqcfcn9.mongodb.net/?retryWrites=true&w=majority';
 const ADMIN_ROLL = '22KT1A4245';
 const ADMIN_PASS = 'manideep';
 
-// Global connection caching across serverless function invocations
-let cachedClient: MongoClient | null = null;
+let cachedClient = null;
 let indexesCreated = false;
 
-function hashPassword(password: string): string {
+function hashPassword(password) {
   return crypto.createHash('sha256').update(password + 'mpz_salt_2026').digest('hex');
 }
 
-function generateToken(rollNumber: string, isAdmin: boolean = false): string {
+function generateToken(rollNumber, isAdmin = false) {
   const payload = JSON.stringify({ rollNumber, isAdmin, timestamp: Date.now() });
   return Buffer.from(payload).toString('base64');
 }
 
-export function parseToken(token?: string): { rollNumber: string; isAdmin: boolean } | null {
+function parseToken(token) {
   if (!token) return null;
   try {
     const json = Buffer.from(token, 'base64').toString('utf-8');
@@ -33,7 +32,7 @@ export function parseToken(token?: string): { rollNumber: string; isAdmin: boole
   }
 }
 
-async function getMongoClient(): Promise<MongoClient> {
+async function getMongoClient() {
   if (cachedClient) return cachedClient;
 
   const client = new MongoClient(MONGO_URI, {
@@ -57,14 +56,14 @@ async function getMongoClient(): Promise<MongoClient> {
       await usersColl.createIndex({ mobileNumber: 1 }, { unique: true });
       
       const optionsColl = appDb.collection('options');
-      const opt = await optionsColl.findOne({ _id: 'dropdown_options' as any });
+      const opt = await optionsColl.findOne({ _id: 'dropdown_options' });
       if (!opt) {
         await optionsColl.insertOne({
           _id: 'dropdown_options',
           colleges: ['PBR VITS', 'JNTUA', 'KL University', 'SRM University', 'Vignan University'],
           branches: ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'AI & DS', 'CSE (Data Science)'],
           years: ['I Year', 'II Year', 'III Year', 'IV Year']
-        } as any);
+        });
       }
 
       const adminUser = await usersColl.findOne({ rollNumber: ADMIN_ROLL });
@@ -84,7 +83,7 @@ async function getMongoClient(): Promise<MongoClient> {
 
       indexesCreated = true;
     } catch {
-      // Ignore index duplicate errors
+      // Ignore existing index duplicates
     }
   }
 
@@ -98,7 +97,7 @@ const DEFAULT_OPTIONS = {
   years: ['I Year', 'II Year', 'III Year', 'IV Year']
 };
 
-function parseMongoCommand(command: string): { collection: string; operation: string; args: any[]; chain: any[] } {
+function parseMongoCommand(command) {
   let cmd = command.trim().replace(/;\s*$/, '');
   
   const match = cmd.match(/^db\.(\w+)\.(\w+)\s*\(([\s\S]*)\)$/);
@@ -122,8 +121,8 @@ function parseMongoCommand(command: string): { collection: string; operation: st
   throw new Error('Invalid command format. Example: db.my_collection.find()');
 }
 
-function parseChain(chainStr: string): Array<{ method: string; args: any[] }> {
-  const methods: Array<{ method: string; args: any[] }> = [];
+function parseChain(chainStr) {
+  const methods = [];
   const regex = /(\w+)\s*\(([\s\S]*?)\)/g;
   let m;
   while ((m = regex.exec(chainStr)) !== null) {
@@ -133,11 +132,11 @@ function parseChain(chainStr: string): Array<{ method: string; args: any[] }> {
   return methods;
 }
 
-function parseArgs(argsStr: string): any[] {
+function parseArgs(argsStr) {
   const trimmed = argsStr.trim();
   if (!trimmed) return [];
   
-  const args: any[] = [];
+  const args = [];
   let depth = 0;
   let current = '';
   let inString = false;
@@ -170,26 +169,26 @@ function parseArgs(argsStr: string): any[] {
   return args;
 }
 
-function parseValue(val: string): any {
+function parseValue(val) {
   try { return JSON5.parse(val); } catch { return val; }
 }
 
 const router = express.Router();
 
 // 1. Options
-router.get('/options', async (_req: Request, res: Response) => {
+router.get('/options', async (_req, res) => {
   try {
     const client = await getMongoClient();
     const optionsColl = client.db('manideep_practice_app').collection('options');
-    let opt: any = await optionsColl.findOne({ _id: 'dropdown_options' as any });
+    let opt = await optionsColl.findOne({ _id: 'dropdown_options' });
     if (!opt) opt = DEFAULT_OPTIONS;
     
     res.json({
       success: true,
       options: {
-        colleges: opt?.colleges || DEFAULT_OPTIONS.colleges,
-        branches: opt?.branches || DEFAULT_OPTIONS.branches,
-        years: opt?.years || DEFAULT_OPTIONS.years
+        colleges: opt.colleges || DEFAULT_OPTIONS.colleges,
+        branches: opt.branches || DEFAULT_OPTIONS.branches,
+        years: opt.years || DEFAULT_OPTIONS.years
       }
     });
   } catch {
@@ -198,7 +197,7 @@ router.get('/options', async (_req: Request, res: Response) => {
 });
 
 // 2. Sign Up
-router.post('/auth/signup', async (req: Request, res: Response) => {
+router.post('/auth/signup', async (req, res) => {
   try {
     const { rollNumber, mobileNumber, password, collegeName, branch, year } = req.body;
 
@@ -267,13 +266,13 @@ router.post('/auth/signup', async (req: Request, res: Response) => {
       }
     });
 
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to create account: ' + (error.message || String(error)) });
   }
 });
 
 // 3. Sign In
-router.post('/auth/signin', async (req: Request, res: Response) => {
+router.post('/auth/signin', async (req, res) => {
   try {
     const { rollNumber, password } = req.body;
 
@@ -319,13 +318,13 @@ router.post('/auth/signin', async (req: Request, res: Response) => {
       }
     });
 
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({ success: false, error: 'Authentication failed: ' + (error.message || String(error)) });
   }
 });
 
 // 4. Session check
-router.get('/auth/me', async (req: Request, res: Response) => {
+router.get('/auth/me', async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
   const session = parseToken(token);
@@ -365,7 +364,7 @@ router.get('/auth/me', async (req: Request, res: Response) => {
 });
 
 // 5. Admin options
-router.post('/admin/options', async (req: Request, res: Response) => {
+router.post('/admin/options', async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
   const session = parseToken(token);
@@ -381,19 +380,19 @@ router.post('/admin/options', async (req: Request, res: Response) => {
     const optionsColl = client.db('manideep_practice_app').collection('options');
 
     await optionsColl.updateOne(
-      { _id: 'dropdown_options' as any },
+      { _id: 'dropdown_options' },
       { $set: { colleges, branches, years, updatedAt: new Date() } },
       { upsert: true }
     );
 
     res.json({ success: true, message: 'Dropdown options updated successfully!' });
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to update options: ' + error.message });
   }
 });
 
 // 6. Admin students
-router.get('/admin/students', async (req: Request, res: Response) => {
+router.get('/admin/students', async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
   const session = parseToken(token);
@@ -409,13 +408,13 @@ router.get('/admin/students', async (req: Request, res: Response) => {
     const students = await usersColl.find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray();
 
     res.json({ success: true, students });
-  } catch (error: any) {
+  } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch students: ' + error.message });
   }
 });
 
 // 7. Execute MongoDB Command
-router.post('/execute', async (req: Request, res: Response) => {
+router.post('/execute', async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
   const session = parseToken(token);
@@ -441,9 +440,9 @@ router.post('/execute', async (req: Request, res: Response) => {
     let activeDbName = overrideDb || `user_db_${cleanRoll}`;
     let db = mongoClient.db(activeDbName);
 
-    let result: any;
+    let result;
     let message = 'Executed successfully';
-    let documentCount: number | undefined;
+    let documentCount;
 
     if (lowerCmd === 'show dbs' || lowerCmd === 'show databases') {
       if (session.isAdmin) {
@@ -743,7 +742,7 @@ router.post('/execute', async (req: Request, res: Response) => {
       executionTime: Date.now() - startTime
     });
 
-  } catch (error: any) {
+  } catch (error) {
     res.json({
       success: false,
       error: error.message || String(error),
@@ -753,7 +752,7 @@ router.post('/execute', async (req: Request, res: Response) => {
 });
 
 // 8. Database collections explorer
-router.get('/collections', async (req: Request, res: Response) => {
+router.get('/collections', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
@@ -781,7 +780,7 @@ router.get('/collections', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/collections/:name', async (req: Request, res: Response) => {
+router.get('/collections/:name', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
@@ -789,7 +788,7 @@ router.get('/collections/:name', async (req: Request, res: Response) => {
     if (!session) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
 
     const { name } = req.params;
-    const limit = parseInt(req.query.limit as string) || 50;
+    const limit = parseInt(req.query.limit) || 50;
     const mongoClient = await getMongoClient();
     const cleanRoll = session.rollNumber.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const userDb = mongoClient.db(`user_db_${cleanRoll}`);
@@ -815,15 +814,4 @@ app.use(express.json({ limit: '2mb' }));
 app.use('/api', router);
 app.use('/', router);
 
-const handler = (req: any, res: any) => {
-  return app(req, res);
-};
-
-export default handler;
-
-// CommonJS & Vercel serverless runtime interop
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = handler;
-  // @ts-ignore
-  module.exports.default = handler;
-}
+module.exports = app;
