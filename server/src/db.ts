@@ -15,10 +15,8 @@ export async function getMongoClient(): Promise<MongoClient> {
     maxPoolSize: 100,               // Connection pool size for 5000+ users
     minPoolSize: 10,                // Keep active connections warm
     maxIdleTimeMS: 30000,           // Close idle connections
-    connectTimeoutMS: 10000,        // Connection timeout
-    serverSelectionTimeoutMS: 10000,// Server selection timeout
-    tls: true,
-    tlsAllowInvalidCertificates: true,
+    connectTimeoutMS: 30000,        // Connection timeout
+    serverSelectionTimeoutMS: 30000,// Server selection timeout
     retryWrites: true,
     w: 'majority'
   });
