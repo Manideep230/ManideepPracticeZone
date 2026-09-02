@@ -11,7 +11,7 @@ export async function getMongoClient(): Promise<MongoClient> {
     return cachedClient;
   }
 
-  const options = {
+  const client = new MongoClient(MONGO_URI, {
     maxPoolSize: 100,               // Connection pool size for 5000+ users
     minPoolSize: 10,                // Keep active connections warm
     maxIdleTimeMS: 30000,           // Close idle connections
@@ -19,31 +19,17 @@ export async function getMongoClient(): Promise<MongoClient> {
     serverSelectionTimeoutMS: 10000,// Server selection timeout
     tls: true,
     tlsAllowInvalidCertificates: true,
-    tlsInsecure: true,
     retryWrites: true,
     w: 'majority'
-  };
+  });
 
-  try {
-    const client = new MongoClient(MONGO_URI, options);
-    await client.connect();
-    cachedClient = client;
-  } catch (err) {
-    console.warn('Standard connection fallback retry...', err);
-    const fallbackClient = new MongoClient(MONGO_URI, {
-      connectTimeoutMS: 15000,
-      serverSelectionTimeoutMS: 15000,
-      tlsAllowInvalidCertificates: true,
-      tlsInsecure: true
-    });
-    await fallbackClient.connect();
-    cachedClient = fallbackClient;
-  }
+  await client.connect();
+  cachedClient = client;
 
   // Create performance indexes once on startup
-  if (!indexesCreated && cachedClient) {
+  if (!indexesCreated) {
     try {
-      const appDb = cachedClient.db('manideep_practice_app');
+      const appDb = client.db('manideep_practice_app');
       const usersColl = appDb.collection('users');
       await usersColl.createIndex({ rollNumber: 1 }, { unique: true });
       await usersColl.createIndex({ mobileNumber: 1 }, { unique: true });
@@ -53,5 +39,5 @@ export async function getMongoClient(): Promise<MongoClient> {
     }
   }
 
-  return cachedClient!;
+  return cachedClient;
 }
