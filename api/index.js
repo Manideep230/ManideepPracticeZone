@@ -841,12 +841,15 @@ router.get('/collections/:name', async (req, res) => {
     if (!session) { res.status(401).json({ success: false, message: 'Unauthorized' }); return; }
 
     const { name } = req.params;
-    const limit = parseInt(req.query.limit) || 50;
+    const limitParam = req.query.limit ? parseInt(req.query.limit) : 0;
     const mongoClient = await getMongoClient();
     const cleanRoll = session.rollNumber.toLowerCase().replace(/[^a-z0-9]/g, '_');
     const userDb = mongoClient.db(`user_db_${cleanRoll}`);
 
-    const documents = await userDb.collection(name).find({}).limit(limit).toArray();
+    const cursor = limitParam > 0
+      ? userDb.collection(name).find({}).limit(limitParam)
+      : userDb.collection(name).find({});
+    const documents = await cursor.toArray();
     const count = await userDb.collection(name).countDocuments();
 
     res.json({ success: true, documents, count, collection: name });

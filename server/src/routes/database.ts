@@ -59,8 +59,11 @@ export function createDatabaseRouter(): Router {
       }
 
       const { name } = req.params;
-      const limit = parseInt(req.query.limit as string) || 50;
-      const documents = await userSession.db.collection(name).find({}).limit(limit).toArray();
+      const limitParam = req.query.limit ? parseInt(req.query.limit as string) : 0;
+      const cursor = limitParam > 0
+        ? userSession.db.collection(name).find({}).limit(limitParam)
+        : userSession.db.collection(name).find({});
+      const documents = await cursor.toArray();
       const count = await userSession.db.collection(name).countDocuments();
 
       res.json({
