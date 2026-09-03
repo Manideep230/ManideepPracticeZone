@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import { ObjectId } from 'mongodb';
 import { getMongoClient } from '../db.js';
 
 const router = Router();
@@ -182,6 +183,14 @@ export function createAuthRouter(): Router {
         return;
       }
 
+      if (user.isDisabled) {
+        res.status(403).json({
+          success: false,
+          error: 'Your account has been disabled by the administrator. Please contact your instructor.'
+        });
+        return;
+      }
+
       const isAdmin = user.rollNumber === ADMIN_ROLL || !!user.isAdmin;
       const token = generateToken(user.rollNumber, isAdmin);
 
@@ -226,6 +235,11 @@ export function createAuthRouter(): Router {
       
       if (!user) {
         res.status(401).json({ success: false, error: 'User not found' });
+        return;
+      }
+
+      if (user.isDisabled) {
+        res.status(403).json({ success: false, error: 'Account disabled' });
         return;
       }
 
@@ -295,6 +309,106 @@ export function createAuthRouter(): Router {
       res.json({ success: true, students });
     } catch (error: any) {
       res.status(500).json({ success: false, error: 'Failed to fetch students: ' + error.message });
+    }
+  });
+
+  // ADMIN: Toggle Disable / Enable Student
+  router.patch('/admin/students/:id/status', async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+    const session = parseToken(token);
+
+    if (!session || !session.isAdmin) {
+      res.status(403).json({ success: false, error: 'Access denied. Admin privileges required.' });
+      return;
+    }
+
+    try {
+      const { id } = req.params;
+      const { isDisabled } = req.body;
+      const client = await getMongoClient();
+      const usersColl = client.db('manideep_practice_app').collection('users');
+
+      let query: any;
+      try {
+        query = { _id: new ObjectId(id) };
+      } catch {
+        query = { rollNumber: id };
+      }
+
+      const targetUser = await usersColl.findOne(query);
+      if (!targetUser) {
+        res.status(404).json({ success: false, error: 'Student not found.' });
+        return;
+      }
+
+      if (targetUser.rollNumber === ADMIN_ROLL || targetUser.isAdmin) {
+        res.status(400).json({ success: false, error: 'Cannot disable administrator account.' });
+        return;
+      }
+
+      const newDisabledState = typeof isDisabled === 'boolean' ? isDisabled : !targetUser.isDisabled;
+
+      await usersColl.updateOne(query, {
+        $set: { isDisabled: newDisabledState, updatedAt: new Date() }
+      });
+
+      res.json({
+        success: true,
+        message: `Student account ${newDisabledState ? 'disabled' : 'enabled'} successfully!`,
+        isDisabled: newDisabledState
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Failed to update student status: ' + error.message });
+    }
+  });
+
+  // ADMIN: Delete / Remove Student
+  router.delete('/admin/students/:id', async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+    const session = parseToken(token);
+
+    if (!session || !session.isAdmin) {
+      res.status(403).json({ success: false, error: 'Access denied. Admin privileges required.' });
+      return;
+    }
+
+    try {
+      const { id } = req.params;
+      const client = await getMongoClient();
+      const usersColl = client.db('manideep_practice_app').collection('users');
+
+      let query: any;
+      try {
+        query = { _id: new ObjectId(id) };
+      } catch {
+        query = { rollNumber: id };
+      }
+
+      const targetUser = await usersColl.findOne(query);
+      if (!targetUser) {
+        res.status(404).json({ success: false, error: 'Student not found.' });
+        return;
+      }
+
+      if (targetUser.rollNumber === ADMIN_ROLL || targetUser.isAdmin) {
+        res.status(400).json({ success: false, error: 'Cannot remove administrator account.' });
+        return;
+      }
+
+      await usersColl.deleteOne(query);
+
+      // Clean up student sandbox db if it exists
+      if (targetUser.userDbName) {
+        try {
+          await client.db(targetUser.userDbName).dropDatabase();
+        } catch {}
+      }
+
+      res.json({ success: true, message: `Student ${targetUser.rollNumber} removed successfully.` });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Failed to remove student: ' + error.message });
     }
   });
 

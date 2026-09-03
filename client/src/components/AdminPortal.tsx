@@ -18,6 +18,7 @@ interface Student {
   year?: string;
   userDbName: string;
   createdAt: string;
+  isDisabled?: boolean;
 }
 
 export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
@@ -34,6 +35,10 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   // Option delete confirmation modal state
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'college' | 'branch' | 'year'; name: string } | null>(null);
 
+  // Student delete confirmation modal state & action loading
+  const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+
   const [adminDbName, setAdminDbName] = useState('user_db_22kt1a4245');
   const [adminCommand, setAdminCommand] = useState('show dbs');
   const [adminExecLoading, setAdminExecLoading] = useState(false);
@@ -45,7 +50,8 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       .then(res => res.json())
       .then(data => {
         if (data.success && data.options) setOptions(data.options);
-      });
+      })
+      .catch(() => {});
   };
 
   const fetchStudents = () => {
@@ -55,13 +61,63 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       .then(res => res.json())
       .then(data => {
         if (data.success && data.students) setStudents(data.students);
-      });
+      })
+      .catch(() => {});
   };
 
   useEffect(() => {
     fetchOptions();
     fetchStudents();
   }, [token]);
+
+  const handleToggleStudentStatus = async (student: Student) => {
+    setActionLoadingId(student._id);
+    try {
+      const res = await fetch(`${API_BASE}/admin/students/${student._id}/status`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ isDisabled: !student.isDisabled })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStudents(prev => prev.map(s => s._id === student._id ? { ...s, isDisabled: data.isDisabled } : s));
+        setStatusMsg({ type: 'success', text: data.message });
+      } else {
+        setStatusMsg({ type: 'error', text: data.error || 'Failed to update student status' });
+      }
+    } catch {
+      setStatusMsg({ type: 'error', text: 'Network error updating student status' });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleConfirmDeleteStudent = async () => {
+    if (!studentToDelete) return;
+    const id = studentToDelete._id;
+    setStudentToDelete(null);
+    setActionLoadingId(id);
+    try {
+      const res = await fetch(`${API_BASE}/admin/students/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStudents(prev => prev.filter(s => s._id !== id));
+        setStatusMsg({ type: 'success', text: data.message });
+      } else {
+        setStatusMsg({ type: 'error', text: data.error || 'Failed to remove student' });
+      }
+    } catch {
+      setStatusMsg({ type: 'error', text: 'Network error removing student' });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
 
   const saveOptions = async (updated: DropdownOptions) => {
     try {
@@ -307,6 +363,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                   <th>College Name</th>
                   <th>Branch</th>
                   <th>Year</th>
+                  <th>Status</th>
                   <th>Atlas Database Name</th>
                   <th>Joined Date</th>
                   <th>Action</th>
@@ -314,25 +371,51 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
               </thead>
               <tbody>
                 {students.map(s => (
-                  <tr key={s._id}>
+                  <tr key={s._id} className={s.isDisabled ? 'row-student-disabled' : ''}>
                     <td><strong>{s.rollNumber}</strong></td>
                     <td>{s.mobileNumber}</td>
                     <td>{s.collegeName || 'N/A'}</td>
                     <td><span className="badge-branch">{s.branch || 'N/A'}</span></td>
                     <td>{s.year || 'N/A'}</td>
+                    <td>
+                      <span className={`badge-status ${s.isDisabled ? 'disabled' : 'active'}`}>
+                        {s.isDisabled ? '🚫 Disabled' : '● Active'}
+                      </span>
+                    </td>
                     <td><code>{s.userDbName}</code></td>
                     <td>{new Date(s.createdAt).toLocaleDateString()}</td>
                     <td>
-                      <button
-                        className="btn-admin-table-action"
-                        onClick={() => {
-                          setAdminDbName(s.userDbName);
-                          setAdminCommand(`// Query database for ${s.rollNumber}:\nshow collections`);
-                          setActiveTab('playground');
-                        }}
-                      >
-                        Inspect DB →
-                      </button>
+                      <div className="admin-table-action-group">
+                        <button
+                          type="button"
+                          className={`btn-student-toggle ${s.isDisabled ? 'enable' : 'disable'}`}
+                          onClick={() => handleToggleStudentStatus(s)}
+                          disabled={actionLoadingId === s._id}
+                          title={s.isDisabled ? 'Enable student account' : 'Disable student account'}
+                        >
+                          {s.isDisabled ? '✓ Enable' : '🚫 Disable'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-student-delete"
+                          onClick={() => setStudentToDelete(s)}
+                          disabled={actionLoadingId === s._id}
+                          title="Remove student permanently"
+                        >
+                          🗑️ Remove
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-admin-table-action"
+                          onClick={() => {
+                            setAdminDbName(s.userDbName);
+                            setAdminCommand(`// Query database for ${s.rollNumber}:\nshow collections`);
+                            setActiveTab('playground');
+                          }}
+                        >
+                          Inspect DB →
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -439,6 +522,18 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
         isDanger={true}
         onConfirm={handleConfirmDeleteOption}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      {/* Student Delete Confirmation Popup */}
+      <ConfirmModal
+        isOpen={!!studentToDelete}
+        title="Confirm Remove Student"
+        message={`Are you sure you want to permanently remove student "${studentToDelete?.rollNumber}" (${studentToDelete?.mobileNumber})? Their account and sandbox database will be deleted.`}
+        confirmText="Confirm Remove"
+        cancelText="Cancel"
+        isDanger={true}
+        onConfirm={handleConfirmDeleteStudent}
+        onCancel={() => setStudentToDelete(null)}
       />
 
       {/* Destructive Command Execution Confirmation Popup */}

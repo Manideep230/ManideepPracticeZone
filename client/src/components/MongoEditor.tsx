@@ -10,21 +10,25 @@ interface MongoEditorProps {
   loading: boolean;
 }
 
-const SNIPPETS = [
-  { label: 'find()', code: 'db.users.find()' },
-  { label: 'findOne()', code: 'db.users.findOne()' },
-  { label: 'insertOne()', code: 'db.users.insertOne({\n  name: "John Doe",\n  role: "Developer",\n  active: true\n})' },
-  { label: 'updateOne()', code: 'db.users.updateOne(\n  { name: "John Doe" },\n  { $set: { status: "verified" } }\n)' },
-  { label: 'aggregate()', code: 'db.users.aggregate([\n  { $match: { active: true } },\n  { $count: "activeUsers" }\n])' },
-  { label: 'stats()', code: 'db.stats()' },
-];
-
 export function MongoEditor({ value, onChange, onRun, onClear, theme, loading }: MongoEditorProps) {
   const editorRef = useRef<any>(null);
   const [copied, setCopied] = useState(false);
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
+
+    // Disable built-in JS standard library suggestions (Java/JS global object hints)
+    if (monaco.languages?.typescript?.javascriptDefaults) {
+      monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+        noLib: true,
+        allowNonTextFiles: false,
+      });
+      monaco.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
+        noSemanticValidation: true,
+        noSyntaxValidation: true,
+        noSuggestionDiagnostics: true,
+      });
+    }
 
     // Define Custom MongoDB Shell Dark Theme
     monaco.editor.defineTheme('mongo-dark', {
@@ -191,24 +195,6 @@ export function MongoEditor({ value, onChange, onRun, onClear, theme, loading }:
         </div>
       </div>
 
-      {/* Quick Snippet Chips Bar */}
-      <div className="editor-snippets-bar">
-        <span className="snippets-label">⚡ Quick Snippets:</span>
-        <div className="snippets-list">
-          {SNIPPETS.map((snip) => (
-            <button
-              key={snip.label}
-              type="button"
-              className="snippet-chip"
-              onClick={() => onChange(snip.code)}
-              title={`Load snippet: ${snip.label}`}
-            >
-              {snip.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Monaco Code Editor */}
       <div className="editor-container">
         <Editor
@@ -230,7 +216,36 @@ export function MongoEditor({ value, onChange, onRun, onClear, theme, loading }:
             tabSize: 2,
             wordWrap: 'on',
             padding: { top: 14, bottom: 14 },
-            suggestOnTriggerCharacters: true,
+            quickSuggestions: false,
+            suggestOnTriggerCharacters: false,
+            parameterHints: { enabled: false },
+            wordBasedSuggestions: 'off',
+            snippetSuggestions: 'none',
+            acceptSuggestionOnEnter: 'off',
+            tabCompletion: 'off',
+            suggest: {
+              showKeywords: false,
+              showSnippets: false,
+              showWords: false,
+              showFunctions: false,
+              showClasses: false,
+              showModules: false,
+              showVariables: false,
+              showProperties: false,
+              showMethods: false,
+              showConstructors: false,
+              showFields: false,
+              showInterfaces: false,
+              showUnits: false,
+              showValues: false,
+              showConstants: false,
+              showEnums: false,
+              showEnumMembers: false,
+              showStructs: false,
+              showEvents: false,
+              showOperators: false,
+              showTypeParameters: false,
+            },
             bracketPairColorization: { enabled: true },
             guides: { bracketPairs: true, indentation: true },
             renderLineHighlight: 'all',
@@ -264,7 +279,7 @@ export function MongoEditor({ value, onChange, onRun, onClear, theme, loading }:
 
         <div className="footer-right">
           <span className="footer-meta-item">Ln {lineCount}, Col {charCount}</span>
-          <span className="footer-mode-tag">mongosh (JS)</span>
+          <span className="footer-mode-tag">mongosh</span>
         </div>
       </div>
     </div>
