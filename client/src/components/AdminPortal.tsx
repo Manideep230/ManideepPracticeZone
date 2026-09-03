@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { DropdownOptions, ExecutionResult } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -72,6 +72,10 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncLoading, setSyncLoading] = useState(false);
 
+  // Student filter & search state for fast, easy student discovery
+  const [studentSearch, setStudentSearch] = useState('');
+  const [studentPresenceFilter, setStudentPresenceFilter] = useState<'all' | 'online' | 'idle' | 'offline' | 'disabled'>('all');
+
   // Option delete confirmation modal state
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'college' | 'branch' | 'year'; name: string } | null>(null);
 
@@ -103,6 +107,27 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [adminExecResult, setAdminExecResult] = useState<ExecutionResult | null>(null);
   const [pendingDeleteCmd, setPendingDeleteCmd] = useState<string | null>(null);
 
+  // Auto-dismiss status alerts after 4.5s for a clean, non-intrusive UI
+  useEffect(() => {
+    if (statusMsg) {
+      const timer = setTimeout(() => setStatusMsg(null), 4500);
+      return () => clearTimeout(timer);
+    }
+  }, [statusMsg]);
+
+  // Smooth ESC key closing for modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (historyStudent) setHistoryStudent(null);
+        if (deleteTarget) setDeleteTarget(null);
+        if (studentToDelete) setStudentToDelete(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [historyStudent, deleteTarget, studentToDelete]);
+
   const fetchOptions = () => {
     fetch(`${API_BASE}/options`)
       .then(res => res.json())
@@ -123,8 +148,9 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       .catch(() => {});
   }, [token]);
 
-  const fetchWorkouts = useCallback((roll = 'all') => {
-    setWorkoutsLoading(true);
+  // Smooth silent polling: avoid flickering UI on auto-refresh
+  const fetchWorkouts = useCallback((roll = 'all', silent = false) => {
+    if (!silent) setWorkoutsLoading(true);
     const q = roll && roll !== 'all' ? `?roll=${encodeURIComponent(roll)}&limit=250` : '?limit=250';
     fetch(`${API_BASE}/admin/workouts${q}`, {
       headers: { Authorization: `Bearer ${token}` }
@@ -136,7 +162,9 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
         }
       })
       .catch(() => {})
-      .finally(() => setWorkoutsLoading(false));
+      .finally(() => {
+        if (!silent) setWorkoutsLoading(false);
+      });
   }, [token]);
 
   useEffect(() => {
@@ -152,14 +180,34 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
     }
   }, [activeTab, token, fetchStudents]);
 
-  // Live real-time workout stream polling every 8 seconds while in Workouts tab
+  // Live real-time workout stream polling every 8 seconds while in Workouts tab (silent = true)
   useEffect(() => {
     if (activeTab === 'workouts' && token) {
-      fetchWorkouts(workoutFilterRoll);
-      const interval = setInterval(() => fetchWorkouts(workoutFilterRoll), 8000);
+      fetchWorkouts(workoutFilterRoll, allWorkouts.length > 0);
+      const interval = setInterval(() => fetchWorkouts(workoutFilterRoll, true), 8000);
       return () => clearInterval(interval);
     }
-  }, [activeTab, workoutFilterRoll, token, fetchWorkouts]);
+  }, [activeTab, workoutFilterRoll, token, fetchWorkouts, allWorkouts.length]);
+
+  // Instant zero-latency memoized student filter
+  const filteredStudents = useMemo(() => {
+    return students.filter(s => {
+      if (studentPresenceFilter === 'online' && s.presenceStatus !== 'online') return false;
+      if (studentPresenceFilter === 'idle' && s.presenceStatus !== 'idle') return false;
+      if (studentPresenceFilter === 'offline' && s.presenceStatus !== 'offline') return false;
+      if (studentPresenceFilter === 'disabled' && !s.isDisabled) return false;
+
+      if (studentSearch.trim()) {
+        const term = studentSearch.trim().toLowerCase();
+        const rollMatch = (s.rollNumber || '').toLowerCase().includes(term);
+        const phoneMatch = (s.mobileNumber || '').toLowerCase().includes(term);
+        const branchMatch = (s.branch || '').toLowerCase().includes(term);
+        const collegeMatch = (s.collegeName || '').toLowerCase().includes(term);
+        return rollMatch || phoneMatch || branchMatch || collegeMatch;
+      }
+      return true;
+    });
+  }, [students, studentPresenceFilter, studentSearch]);
 
   const handleViewStudentHistory = async (student: Student) => {
     setHistoryStudent(student);
@@ -384,7 +432,15 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
 
       {statusMsg && (
         <div className={`admin-alert ${statusMsg.type}`}>
-          {statusMsg.text}
+          <span>{statusMsg.text}</span>
+          <button
+            type="button"
+            className="alert-close-btn"
+            onClick={() => setStatusMsg(null)}
+            title="Dismiss message"
+          >
+            ×
+          </button>
         </div>
       )}
 
@@ -405,7 +461,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
           className={`admin-tab ${activeTab === 'workouts' ? 'active' : ''}`}
           onClick={() => {
             setActiveTab('workouts');
-            fetchWorkouts(workoutFilterRoll);
+            fetchWorkouts(workoutFilterRoll, allWorkouts.length > 0);
           }}
         >
           🏋️ Student Workouts (Live Feed)
@@ -426,9 +482,10 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
             <div className="admin-input-group">
               <input
                 type="text"
-                placeholder="Add new college name..."
+                placeholder="Add new college name (Press Enter)..."
                 value={newCollege}
                 onChange={e => setNewCollege(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAddCollege(); }}
               />
               <button onClick={handleAddCollege}>Add</button>
             </div>
@@ -471,9 +528,10 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
             <div className="admin-input-group">
               <input
                 type="text"
-                placeholder="Add new branch..."
+                placeholder="Add new branch (Press Enter)..."
                 value={newBranch}
                 onChange={e => setNewBranch(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAddBranch(); }}
               />
               <button onClick={handleAddBranch}>Add</button>
             </div>
@@ -498,9 +556,10 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
             <div className="admin-input-group">
               <input
                 type="text"
-                placeholder="Add new academic year..."
+                placeholder="Add new academic year (Press Enter)..."
                 value={newYear}
                 onChange={e => setNewYear(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAddYear(); }}
               />
               <button onClick={handleAddYear}>Add</button>
             </div>
@@ -521,17 +580,27 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
         </div>
       ) : activeTab === 'students' ? (
         <div className="admin-students-section">
-          {/* Real-Time Student Activity Stats Banner */}
+          {/* Real-Time Student Activity Stats Banner - Clickable Quick Filters */}
           <div className="admin-presence-stats-grid">
-            <div className="presence-stat-card total">
+            <button
+              type="button"
+              className={`presence-stat-card total ${studentPresenceFilter === 'all' ? 'active-filter' : ''}`}
+              onClick={() => setStudentPresenceFilter('all')}
+              title="View all registered students"
+            >
               <div className="stat-card-icon">👥</div>
               <div className="stat-card-info">
                 <span className="stat-card-label">Total Registered</span>
                 <span className="stat-card-value">{students.length}</span>
               </div>
-            </div>
+            </button>
 
-            <div className="presence-stat-card online">
+            <button
+              type="button"
+              className={`presence-stat-card online ${studentPresenceFilter === 'online' ? 'active-filter' : ''}`}
+              onClick={() => setStudentPresenceFilter(prev => prev === 'online' ? 'all' : 'online')}
+              title="Click to filter active online students"
+            >
               <div className="stat-card-icon">
                 <span className="live-pulse-dot" />
               </div>
@@ -539,32 +608,71 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                 <span className="stat-card-label">Online (Active)</span>
                 <span className="stat-card-value">{students.filter(s => s.presenceStatus === 'online').length}</span>
               </div>
-            </div>
+            </button>
 
-            <div className="presence-stat-card idle">
+            <button
+              type="button"
+              className={`presence-stat-card idle ${studentPresenceFilter === 'idle' ? 'active-filter' : ''}`}
+              onClick={() => setStudentPresenceFilter(prev => prev === 'idle' ? 'all' : 'idle')}
+              title="Click to filter constant state students (idle > 5 mins)"
+            >
               <div className="stat-card-icon">⏳</div>
               <div className="stat-card-info">
                 <span className="stat-card-label">Constant State (&gt;5m)</span>
                 <span className="stat-card-value">{students.filter(s => s.presenceStatus === 'idle').length}</span>
               </div>
-            </div>
+            </button>
 
-            <div className="presence-stat-card offline">
+            <button
+              type="button"
+              className={`presence-stat-card offline ${studentPresenceFilter === 'offline' ? 'active-filter' : ''}`}
+              onClick={() => setStudentPresenceFilter(prev => prev === 'offline' ? 'all' : 'offline')}
+              title="Click to filter offline students"
+            >
               <div className="stat-card-icon">⚪</div>
               <div className="stat-card-info">
                 <span className="stat-card-label">Offline</span>
                 <span className="stat-card-value">{students.filter(s => s.presenceStatus === 'offline').length}</span>
               </div>
-            </div>
+            </button>
           </div>
 
           <div className="admin-table-card">
             <div className="admin-table-card-header">
-              <h3>👥 Registered Students &amp; Live Activity Monitoring</h3>
+              <div className="admin-table-title-area">
+                <h3>
+                  👥 Registered Students ({filteredStudents.length}
+                  {filteredStudents.length !== students.length ? ` of ${students.length}` : ''})
+                </h3>
+                {studentPresenceFilter !== 'all' && (
+                  <span className="filter-active-pill">
+                    Filter: <strong>{studentPresenceFilter.toUpperCase()}</strong>
+                    <button type="button" onClick={() => setStudentPresenceFilter('all')}>×</button>
+                  </span>
+                )}
+              </div>
+
               <div className="admin-table-header-actions">
-                <span className="live-refresh-note">
-                  <span className="live-ping-small" /> Live Monitoring (auto-refresh 12s)
-                </span>
+                <div className="table-search-box">
+                  <span className="search-icon">🔍</span>
+                  <input
+                    type="text"
+                    placeholder="Search roll, phone, branch..."
+                    value={studentSearch}
+                    onChange={e => setStudentSearch(e.target.value)}
+                  />
+                  {studentSearch && (
+                    <button
+                      type="button"
+                      className="btn-clear-search"
+                      onClick={() => setStudentSearch('')}
+                      title="Clear search"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+
                 <button
                   type="button"
                   className="btn-admin-refresh"
@@ -592,7 +700,22 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {students.map(s => {
+                  {filteredStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '36px 16px', color: 'var(--text-secondary)' }}>
+                        <div style={{ fontSize: '15px', marginBottom: '8px' }}>🔍 No students found matching your criteria.</div>
+                        <button
+                          type="button"
+                          className="btn-admin-table-action"
+                          style={{ padding: '6px 16px', fontSize: '12px', marginTop: '6px' }}
+                          onClick={() => { setStudentSearch(''); setStudentPresenceFilter('all'); }}
+                        >
+                          Reset Filters &amp; Search
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredStudents.map(s => {
                     const status = s.presenceStatus || 'offline';
                     const hasWorkout = s.workout && s.workout.total > 0;
                     return (
@@ -693,7 +816,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                         </td>
                       </tr>
                     );
-                  })}
+                  }))}
                 </tbody>
               </table>
             </div>

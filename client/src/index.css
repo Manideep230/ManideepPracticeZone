@@ -1742,10 +1742,29 @@ body {
 }
 
 .admin-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 12px 16px;
   border-radius: var(--radius-sm);
   font-size: 14px;
   margin-bottom: 20px;
+  animation: fadeIn 0.2s ease-in;
+}
+.alert-close-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  opacity: 0.75;
+  padding: 0 4px;
+  line-height: 1;
+  transition: opacity 0.15s ease;
+}
+.alert-close-btn:hover {
+  opacity: 1;
 }
 .admin-alert.success {
   background: var(--success-bg);
@@ -1873,6 +1892,7 @@ body {
 }
 .admin-table-wrapper {
   overflow-x: auto;
+  max-height: 70vh;
 }
 .admin-table {
   width: 100%;
@@ -1890,6 +1910,17 @@ body {
   text-transform: uppercase;
   font-size: 11px;
   letter-spacing: 0.04em;
+  position: sticky;
+  top: 0;
+  background: var(--bg-secondary);
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--border-light);
+}
+.admin-table tbody tr {
+  transition: background-color 0.15s ease;
+}
+.admin-table tbody tr:hover {
+  background: var(--bg-tertiary);
 }
 .badge-branch {
   display: inline-block;
@@ -2195,11 +2226,22 @@ body {
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  transition: transform var(--transition), border-color var(--transition);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .presence-stat-card:hover {
   transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+}
+
+.presence-stat-card.active-filter {
+  border-color: var(--accent);
+  background: var(--bg-tertiary);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3);
 }
 
 .presence-stat-card.total {
@@ -2264,11 +2306,84 @@ body {
   justify-content: space-between;
   margin-bottom: 14px;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
 }
 
-.admin-table-card-header h3 {
+.admin-table-title-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.admin-table-title-area h3 {
   margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.filter-active-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  font-size: 11px;
+  font-weight: 600;
+}
+.filter-active-pill button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.table-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.table-search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+.table-search-box .search-icon {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.table-search-box input {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  width: 180px;
+  font-family: var(--font-ui);
+}
+.btn-clear-search {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.btn-clear-search:hover {
+  color: var(--text-primary);
 }
 
 .admin-table-header-actions {
