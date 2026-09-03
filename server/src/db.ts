@@ -29,44 +29,45 @@ export async function getMongoClient(): Promise<MongoClient> {
   await client.connect();
   cachedClient = client;
 
-  // Lazy seed indexes, default options, and admin on first request
+  // Run lazy seed indexes and default options asynchronously in the background
   if (!indexesCreated) {
-    try {
-      const appDb = client.db('manideep_practice_app');
-      const usersColl = appDb.collection('users');
-      await usersColl.createIndex({ rollNumber: 1 }, { unique: true });
-      await usersColl.createIndex({ mobileNumber: 1 }, { unique: true });
-      
-      const optionsColl = appDb.collection('options');
-      const opt = await optionsColl.findOne({ _id: 'dropdown_options' as any });
-      if (!opt) {
-        await optionsColl.insertOne({
-          _id: 'dropdown_options',
-          colleges: ['PBR VITS', 'JNTUA', 'KL University', 'SRM University', 'Vignan University'],
-          branches: ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'AI & DS', 'CSE (Data Science)'],
-          years: ['I Year', 'II Year', 'III Year', 'IV Year']
-        } as any);
-      }
+    indexesCreated = true;
+    (async () => {
+      try {
+        const appDb = client.db('manideep_practice_app');
+        const usersColl = appDb.collection('users');
+        await usersColl.createIndex({ rollNumber: 1 }, { unique: true });
+        await usersColl.createIndex({ mobileNumber: 1 }, { unique: true });
 
-      const adminUser = await usersColl.findOne({ rollNumber: '22KT1A4245' });
-      if (!adminUser) {
-        await usersColl.insertOne({
-          rollNumber: '22KT1A4245',
-          mobileNumber: '9999999999',
-          password: hashPassword('manideep'),
-          collegeName: 'Admin Portal',
-          branch: 'CSE',
-          year: 'IV Year',
-          isAdmin: true,
-          userDbName: 'user_db_22kt1a4245',
-          createdAt: new Date()
-        });
-      }
+        const optionsColl = appDb.collection('options');
+        const opt = await optionsColl.findOne({ _id: 'dropdown_options' as any });
+        if (!opt) {
+          await optionsColl.insertOne({
+            _id: 'dropdown_options',
+            colleges: ['PBR VITS', 'JNTUA', 'KL University', 'SRM University', 'Vignan University'],
+            branches: ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'AI & DS', 'CSE (Data Science)'],
+            years: ['I Year', 'II Year', 'III Year', 'IV Year']
+          } as any);
+        }
 
-      indexesCreated = true;
-    } catch {
-      // Indexes may already exist
-    }
+        const adminUser = await usersColl.findOne({ rollNumber: '22KT1A4245' });
+        if (!adminUser) {
+          await usersColl.insertOne({
+            rollNumber: '22KT1A4245',
+            mobileNumber: '9999999999',
+            password: hashPassword('manideep'),
+            collegeName: 'Admin Portal',
+            branch: 'CSE',
+            year: 'IV Year',
+            isAdmin: true,
+            userDbName: 'user_db_22kt1a4245',
+            createdAt: new Date()
+          });
+        }
+      } catch {
+        // Indexes may already exist
+      }
+    })().catch(() => {});
   }
 
   return cachedClient;

@@ -1,5 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
+
 
 /* ========================================
    CSS VARIABLES — Design Tokens
@@ -719,26 +719,190 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-secondary);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(0, 0, 0, 0.15) 100%), var(--bg-secondary);
+  backdrop-filter: blur(8px);
 }
 
 .editor-toolbar-left, .editor-toolbar-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
-.editor-label {
+/* Terminal Window Dots */
+.terminal-window-dots {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  margin-right: 4px;
+}
+
+.terminal-window-dots .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  transition: transform var(--transition);
+}
+
+.terminal-window-dots:hover .dot {
+  transform: scale(1.15);
+}
+
+.dot-red {
+  background: #ff5f56;
+  box-shadow: 0 0 6px rgba(255, 95, 86, 0.5);
+}
+
+.dot-yellow {
+  background: #ffbd2e;
+  box-shadow: 0 0 6px rgba(255, 189, 46, 0.5);
+}
+
+.dot-green {
+  background: #27c93f;
+  box-shadow: 0 0 6px rgba(39, 201, 63, 0.5);
+}
+
+/* Shell Title Group */
+.shell-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shell-icon-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: rgba(0, 237, 100, 0.12);
+  border: 1px solid rgba(0, 237, 100, 0.25);
+  border-radius: 5px;
+  color: #00ed64;
+}
+
+.shell-title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.shell-status-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(0, 237, 100, 0.08);
+  border: 1px solid rgba(0, 237, 100, 0.2);
+  font-size: 10px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: #00ed64;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+}
+
+.live-ping {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #00ed64;
+  box-shadow: 0 0 8px #00ed64;
+  animation: pulse-ping 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-ping {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Toolbar Action Buttons (Format, Copy) */
+.btn-toolbar-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-toolbar-action:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+/* Quick Snippets Bar */
+.editor-snippets-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border-light);
+  overflow-x: auto;
+}
+
+.snippets-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.snippets-list {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.snippet-chip {
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: #7dd3fc;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+
+.snippet-chip:hover {
+  background: rgba(56, 189, 248, 0.2);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: #bae6fd;
+  transform: translateY(-1px);
+}
+
+.btn-run-kbd {
+  display: inline-block;
+  padding: 1px 4px;
+  margin-left: 3px;
+  font-size: 9px;
+  font-family: var(--font-mono);
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+  color: inherit;
+  opacity: 0.8;
 }
 
 .editor-container {
@@ -747,9 +911,45 @@ body {
 }
 
 .editor-footer {
-  padding: 4px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 14px;
   border-top: 1px solid var(--border-light);
   background: var(--bg-secondary);
+  font-size: 11px;
+}
+
+.footer-left, .footer-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.footer-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #00ed64;
+  font-weight: 500;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.footer-meta-item {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.footer-mode-tag {
+  padding: 1px 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
 }
 
 .editor-hint {
@@ -834,8 +1034,10 @@ body {
   background: var(--bg-tertiary);
   color: var(--text-secondary);
 }
-.meta-badge.time {
-  color: var(--accent);
+.meta-badge.doc-count {
+  background: rgba(0, 237, 100, 0.1);
+  color: #00ed64;
+  border: 1px solid rgba(0, 237, 100, 0.2);
 }
 
 .output-body {
@@ -850,9 +1052,48 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  gap: 12px;
+  gap: 10px;
   color: var(--text-tertiary);
-  font-size: 14px;
+  text-align: center;
+  padding: 24px;
+}
+
+.output-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: rgba(0, 237, 100, 0.05);
+  border: 1px solid rgba(0, 237, 100, 0.15);
+  color: #00ed64;
+  margin-bottom: 4px;
+}
+
+.output-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.output-empty-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+.output-empty-sub kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-secondary);
 }
 
 .output-loading {

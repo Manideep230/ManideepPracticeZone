@@ -4,19 +4,35 @@ import { User, DropdownOptions } from '../types';
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
 export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const cached = localStorage.getItem('mpz-user');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
   const [token, setToken] = useState<string | null>(() => {
     return localStorage.getItem('mpz-token');
   });
-  const [loading, setLoading] = useState(true);
+
+  // If token and cached user exist or no token at all, don't block the screen!
+  const [loading, setLoading] = useState<boolean>(() => {
+    const t = localStorage.getItem('mpz-token');
+    const u = localStorage.getItem('mpz-user');
+    if (!t) return false;
+    if (t && u) return false; // Stale-while-revalidate: instant render
+    return true;
+  });
+
   const [authError, setAuthError] = useState<string | null>(null);
   const [options, setOptions] = useState<DropdownOptions>({
-    colleges: ['PBR VITS', 'JNTUA', 'KL University', 'SRM University'],
-    branches: ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'AI & DS'],
+    colleges: ['PBR VITS', 'JNTUA', 'KL University', 'SRM University', 'Vignan University'],
+    branches: ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'AI & DS', 'CSE (Data Science)'],
     years: ['I Year', 'II Year', 'III Year', 'IV Year']
   });
 
-  // Fetch dropdown options on mount
+  // Fetch dropdown options asynchronously in background
   useEffect(() => {
     fetch(`${API_BASE}/options`)
       .then(res => res.json())
@@ -28,7 +44,7 @@ export function useAuth() {
       .catch(() => {});
   }, []);
 
-  // Check active token on mount
+  // Revalidate session in background (Stale-While-Revalidate)
   useEffect(() => {
     if (!token) {
       setUser(null);
@@ -43,8 +59,10 @@ export function useAuth() {
       .then(data => {
         if (data.success && data.user) {
           setUser(data.user);
+          localStorage.setItem('mpz-user', JSON.stringify(data.user));
         } else {
           localStorage.removeItem('mpz-token');
+          localStorage.removeItem('mpz-user');
           setToken(null);
           setUser(null);
         }
@@ -73,6 +91,7 @@ export function useAuth() {
       const data = await res.json();
       if (data.success && data.token && data.user) {
         localStorage.setItem('mpz-token', data.token);
+        localStorage.setItem('mpz-user', JSON.stringify(data.user));
         setToken(data.token);
         setUser(data.user);
         return true;
@@ -97,6 +116,7 @@ export function useAuth() {
       const data = await res.json();
       if (data.success && data.token && data.user) {
         localStorage.setItem('mpz-token', data.token);
+        localStorage.setItem('mpz-user', JSON.stringify(data.user));
         setToken(data.token);
         setUser(data.user);
         return true;
@@ -112,6 +132,7 @@ export function useAuth() {
 
   const signOut = useCallback(() => {
     localStorage.removeItem('mpz-token');
+    localStorage.removeItem('mpz-user');
     setToken(null);
     setUser(null);
   }, []);
