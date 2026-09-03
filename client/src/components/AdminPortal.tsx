@@ -70,6 +70,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [newBranch, setNewBranch] = useState('');
   const [newYear, setNewYear] = useState('');
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [syncLoading, setSyncLoading] = useState(false);
 
   // Option delete confirmation modal state
   const [deleteTarget, setDeleteTarget] = useState<{ type: 'college' | 'branch' | 'year'; name: string } | null>(null);
@@ -245,12 +246,39 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       const data = await res.json();
       if (data.success) {
         setOptions(updated);
-        setStatusMsg({ type: 'success', text: 'Dropdown options saved successfully!' });
+        setStatusMsg({ type: 'success', text: 'Dropdown options saved & students synchronized!' });
+        fetchStudents();
       } else {
         setStatusMsg({ type: 'error', text: data.error || 'Failed to save options.' });
       }
     } catch {
       setStatusMsg({ type: 'error', text: 'Network error saving options.' });
+    }
+  };
+
+  const handleSyncAllStudentsCollege = async () => {
+    if (!token || options.colleges.length === 0) return;
+    setSyncLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/students/sync-college`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ targetCollege: options.colleges[0] })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusMsg({ type: 'success', text: data.message });
+        fetchStudents();
+      } else {
+        setStatusMsg({ type: 'error', text: data.error || 'Failed to sync students college' });
+      }
+    } catch {
+      setStatusMsg({ type: 'error', text: 'Network error synchronizing students' });
+    } finally {
+      setSyncLoading(false);
     }
   };
 
@@ -417,6 +445,24 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                 </li>
               ))}
             </ul>
+
+            {options.colleges.length === 1 && (
+              <div className="college-sync-banner" style={{ marginTop: '14px', padding: '10px 12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  Official Active College: <strong style={{ color: 'var(--accent)' }}>{options.colleges[0]}</strong>
+                </div>
+                <button
+                  type="button"
+                  className="btn-admin-table-action"
+                  onClick={handleSyncAllStudentsCollege}
+                  disabled={syncLoading}
+                  style={{ alignSelf: 'flex-start', padding: '6px 12px', fontSize: '11px' }}
+                  title="Update all registered students in the database to this college"
+                >
+                  {syncLoading ? 'Syncing...' : `🔄 Sync All Students to ${options.colleges[0].split(',')[0]}`}
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Branches */}
@@ -690,11 +736,16 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                   className="admin-select-filter"
                 >
                   <option value="all">👥 All Students ({allWorkouts.length} queries)</option>
-                  {students.map(s => (
-                    <option key={s._id} value={s.rollNumber}>
-                      {s.rollNumber} — {s.collegeName || ''} ({s.workout?.total || 0} cmds)
-                    </option>
-                  ))}
+                  {students.map(s => {
+                    const cName = (options.colleges.length === 1 && (!s.collegeName || s.collegeName === 'PBR VITS' || !options.colleges.includes(s.collegeName)))
+                      ? options.colleges[0]
+                      : (s.collegeName || '');
+                    return (
+                      <option key={s._id} value={s.rollNumber}>
+                        {s.rollNumber} — {cName} ({s.workout?.total || 0} cmds)
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 

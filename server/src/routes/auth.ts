@@ -31,7 +31,7 @@ export function parseToken(token?: string): { rollNumber: string; isAdmin: boole
 // Default dropdown options
 const DEFAULT_OPTIONS = {
   _id: 'dropdown_options',
-  colleges: ['PBR VITS', 'JNTUA', 'KL University', 'SRM University', 'Vignan University'],
+  colleges: ['GMRIT College, Vizianagaram'],
   branches: ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'AI & DS', 'CSE (Data Science)'],
   years: ['I Year', 'II Year', 'III Year', 'IV Year']
 };
@@ -49,9 +49,9 @@ export function createAuthRouter(): Router {
       res.json({
         success: true,
         options: {
-          colleges: opt?.colleges || DEFAULT_OPTIONS.colleges,
-          branches: opt?.branches || DEFAULT_OPTIONS.branches,
-          years: opt?.years || DEFAULT_OPTIONS.years
+          colleges: (opt?.colleges && opt.colleges.length > 0) ? opt.colleges : DEFAULT_OPTIONS.colleges,
+          branches: (opt?.branches && opt.branches.length > 0) ? opt.branches : DEFAULT_OPTIONS.branches,
+          years: (opt?.years && opt.years.length > 0) ? opt.years : DEFAULT_OPTIONS.years
         }
       });
     } catch {
@@ -284,9 +284,61 @@ export function createAuthRouter(): Router {
         { upsert: true }
       );
 
-      res.json({ success: true, message: 'Dropdown options updated successfully!' });
+      // If only 1 college is placed, automatically update all existing students to this official college
+      if (Array.isArray(colleges) && colleges.length === 1 && colleges[0]) {
+        const usersColl = client.db('manideep_practice_app').collection('users');
+        await usersColl.updateMany(
+          { isAdmin: { $ne: true }, collegeName: { $ne: colleges[0] } },
+          { $set: { collegeName: colleges[0], updatedAt: new Date() } }
+        );
+      }
+
+      res.json({ success: true, message: 'Dropdown options saved & student colleges updated successfully!' });
     } catch (error: any) {
       res.status(500).json({ success: false, error: 'Failed to update options: ' + error.message });
+    }
+  });
+
+  // ADMIN: Explicitly Sync All Students to Current Active College Option
+  router.post('/admin/students/sync-college', async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+    const session = parseToken(token);
+
+    if (!session || !session.isAdmin) {
+      res.status(403).json({ success: false, error: 'Access denied. Admin privileges required.' });
+      return;
+    }
+
+    try {
+      const { targetCollege, fromCollege } = req.body;
+      const client = await getMongoClient();
+      const usersColl = client.db('manideep_practice_app').collection('users');
+      const optionsColl = client.db('manideep_practice_app').collection('options');
+
+      let collegeToSet = targetCollege;
+      if (!collegeToSet) {
+        const optDoc: any = await optionsColl.findOne({ _id: 'dropdown_options' as any });
+        collegeToSet = optDoc?.colleges?.[0] || 'GMRIT College, Vizianagaram';
+      }
+
+      const filter: any = { isAdmin: { $ne: true } };
+      if (fromCollege) {
+        filter.collegeName = fromCollege;
+      }
+
+      const resUpdate = await usersColl.updateMany(filter, {
+        $set: { collegeName: collegeToSet, updatedAt: new Date() }
+      });
+
+      res.json({
+        success: true,
+        message: `Successfully synchronized ${resUpdate.modifiedCount} student(s) to "${collegeToSet}"`,
+        modifiedCount: resUpdate.modifiedCount,
+        college: collegeToSet
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Failed to sync students: ' + error.message });
     }
   });
 
@@ -363,6 +415,11 @@ export function createAuthRouter(): Router {
       const client = await getMongoClient();
       const usersColl = client.db('manideep_practice_app').collection('users');
       const historyColl = client.db('manideep_practice_app').collection('command_histories');
+      const optionsColl = client.db('manideep_practice_app').collection('options');
+
+      const optDoc: any = await optionsColl.findOne({ _id: 'dropdown_options' as any });
+      const currentColleges: string[] = (optDoc?.colleges && optDoc.colleges.length > 0) ? optDoc.colleges : DEFAULT_OPTIONS.colleges;
+      const singleCollege = currentColleges.length === 1 ? currentColleges[0] : null;
 
       const students = await usersColl.find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray();
 
@@ -408,8 +465,14 @@ export function createAuthRouter(): Router {
         const cleanRoll = String(s.rollNumber).trim().toUpperCase();
         const w = workoutMap.get(cleanRoll) || { totalCommands: 0, successCount: 0, failCount: 0, lastWorkout: null };
 
+        let resolvedCollege = s.collegeName;
+        if (singleCollege && (!resolvedCollege || resolvedCollege === 'PBR VITS' || !currentColleges.includes(resolvedCollege))) {
+          resolvedCollege = singleCollege;
+        }
+
         return {
           ...s,
+          collegeName: resolvedCollege,
           presenceStatus,
           idleMinutes: idleMins,
           lastActiveTime: s.lastActive || s.lastHeartbeat || s.createdAt,

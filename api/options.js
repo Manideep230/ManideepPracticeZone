@@ -5,7 +5,7 @@ let cachedClient = null;
 
 const DEFAULT_OPTIONS = {
   _id: 'dropdown_options',
-  colleges: ['PBR VITS', 'JNTUA', 'KL University', 'SRM University', 'Vignan University'],
+  colleges: ['GMRIT College, Vizianagaram'],
   branches: ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'AI & DS', 'CSE (Data Science)'],
   years: ['I Year', 'II Year', 'III Year', 'IV Year']
 };
@@ -42,9 +42,9 @@ module.exports = async (req, res) => {
     res.status(200).json({
       success: true,
       options: {
-        colleges: opt.colleges || DEFAULT_OPTIONS.colleges,
-        branches: opt.branches || DEFAULT_OPTIONS.branches,
-        years: opt.years || DEFAULT_OPTIONS.years
+        colleges: (opt.colleges && opt.colleges.length > 0) ? opt.colleges : DEFAULT_OPTIONS.colleges,
+        branches: (opt.branches && opt.branches.length > 0) ? opt.branches : DEFAULT_OPTIONS.branches,
+        years: (opt.years && opt.years.length > 0) ? opt.years : DEFAULT_OPTIONS.years
       }
     });
   } catch (e) {
