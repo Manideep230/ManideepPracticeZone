@@ -535,20 +535,24 @@ export function createAuthRouter(): Router {
     try {
       const client = await getMongoClient();
       const historyColl = client.db('manideep_practice_app').collection('command_histories');
-      const { roll, limit = '150' } = req.query;
+      const { roll, limit = 'all' } = req.query;
 
       const query: any = {};
       if (roll && typeof roll === 'string' && roll.trim() && roll !== 'all') {
         query.rollNumber = { $regex: new RegExp(`^${roll.trim()}$`, 'i') };
       }
 
-      const workouts = await historyColl
-        .find(query)
-        .sort({ timestamp: -1 })
-        .limit(Math.min(parseInt(limit as string, 10) || 150, 500))
-        .toArray();
+      let cursor = historyColl.find(query).sort({ timestamp: -1 });
+      if (limit && limit !== 'all') {
+        const parsedLimit = parseInt(limit as string, 10);
+        if (parsedLimit > 0) {
+          cursor = cursor.limit(parsedLimit);
+        }
+      }
 
-      res.json({ success: true, workouts });
+      const workouts = await cursor.toArray();
+
+      res.json({ success: true, workouts, total: workouts.length });
     } catch (error: any) {
       res.status(500).json({ success: false, error: 'Failed to fetch workouts: ' + error.message });
     }

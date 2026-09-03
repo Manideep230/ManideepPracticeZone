@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import * as XLSX from 'xlsx';
 import { DropdownOptions, ExecutionResult } from '../types';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -98,6 +99,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [workoutFilterRoll, setWorkoutFilterRoll] = useState('all');
   const [workoutFilterStatus, setWorkoutFilterStatus] = useState<'all' | 'success' | 'fail'>('all');
   const [workoutSearch, setWorkoutSearch] = useState('');
+  const [workoutLimit, setWorkoutLimit] = useState<string>('all');
   const [expandedWorkoutIds, setExpandedWorkoutIds] = useState<Record<string, boolean>>({});
   const [workoutCopiedId, setWorkoutCopiedId] = useState<string | null>(null);
 
@@ -148,11 +150,13 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       .catch(() => {});
   }, [token]);
 
-  // Smooth silent polling: avoid flickering UI on auto-refresh
-  const fetchWorkouts = useCallback((roll = 'all', silent = false) => {
+  // Smooth silent polling: avoid flickering UI on auto-refresh, supports limit=all
+  const fetchWorkouts = useCallback((roll = 'all', silent = false, limitChoice?: string) => {
     if (!silent) setWorkoutsLoading(true);
-    const q = roll && roll !== 'all' ? `?roll=${encodeURIComponent(roll)}&limit=250` : '?limit=250';
-    fetch(`${API_BASE}/admin/workouts${q}`, {
+    const activeLimit = limitChoice !== undefined ? limitChoice : workoutLimit;
+    const qRoll = roll && roll !== 'all' ? `&roll=${encodeURIComponent(roll)}` : '';
+    const qLimit = activeLimit ? `limit=${encodeURIComponent(activeLimit)}` : 'limit=all';
+    fetch(`${API_BASE}/admin/workouts?${qLimit}${qRoll}`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(res => res.json())
@@ -165,7 +169,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       .finally(() => {
         if (!silent) setWorkoutsLoading(false);
       });
-  }, [token]);
+  }, [token, workoutLimit]);
 
   useEffect(() => {
     fetchOptions();
@@ -183,11 +187,11 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   // Live real-time workout stream polling every 8 seconds while in Workouts tab (silent = true)
   useEffect(() => {
     if (activeTab === 'workouts' && token) {
-      fetchWorkouts(workoutFilterRoll, allWorkouts.length > 0);
-      const interval = setInterval(() => fetchWorkouts(workoutFilterRoll, true), 8000);
+      fetchWorkouts(workoutFilterRoll, allWorkouts.length > 0, workoutLimit);
+      const interval = setInterval(() => fetchWorkouts(workoutFilterRoll, true, workoutLimit), 8000);
       return () => clearInterval(interval);
     }
-  }, [activeTab, workoutFilterRoll, token, fetchWorkouts, allWorkouts.length]);
+  }, [activeTab, workoutFilterRoll, token, fetchWorkouts, allWorkouts.length, workoutLimit]);
 
   // Instant zero-latency memoized student filter
   const filteredStudents = useMemo(() => {
@@ -327,6 +331,135 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       setStatusMsg({ type: 'error', text: 'Network error synchronizing students' });
     } finally {
       setSyncLoading(false);
+    }
+  };
+
+  // Export student performance to Excel (.xlsx) with branch-wise sheets in ascending order of roll numbers
+  const handleExportBranchWiseExcel = () => {
+    if (!students || students.length === 0) {
+      setStatusMsg({ type: 'error', text: 'No student records available to export.' });
+      return;
+    }
+
+    try {
+      const naturalRollSort = (a: Student, b: Student) => {
+        return (a.rollNumber || '').localeCompare(b.rollNumber || '', undefined, { numeric: true, sensitivity: 'base' });
+      };
+
+      const formatStudentRow = (s: Student, idx: number) => {
+        const total = s.workout?.total || 0;
+        const success = s.workout?.success || 0;
+        const failed = s.workout?.failed || 0;
+        const successRate = total > 0 ? `${((success / total) * 100).toFixed(1)}%` : '0%';
+        let lastWorkoutStr = 'No queries run';
+        if (s.workout?.lastWorkoutTime) {
+          const d = new Date(s.workout.lastWorkoutTime);
+          lastWorkoutStr = isNaN(d.getTime()) ? String(s.workout.lastWorkoutTime) : d.toLocaleString();
+        }
+
+        return {
+          'S.No': idx + 1,
+          'Roll Number': s.rollNumber,
+          'Mobile Number': s.mobileNumber,
+          'College Name': s.collegeName || 'GMRIT College, Vizianagaram',
+          'Branch': s.branch || 'General',
+          'Year': s.year || 'N/A',
+          'Total Commands': total,
+          'Successful Queries': success,
+          'Error Queries': failed,
+          'Success Rate': successRate,
+          'Last Activity / Workout': lastWorkoutStr,
+          'Live Presence': s.presenceStatus === 'online' ? 'Active Now' : s.presenceStatus === 'idle' ? `Constant State (${s.idleMinutes || 5}m idle)` : 'Offline',
+          'Account Status': s.isDisabled ? 'Disabled' : 'Active'
+        };
+      };
+
+      const colsWidth = [
+        { wch: 6 },   // S.No
+        { wch: 18 },  // Roll Number
+        { wch: 15 },  // Mobile Number
+        { wch: 32 },  // College Name
+        { wch: 12 },  // Branch
+        { wch: 12 },  // Year
+        { wch: 16 },  // Total Commands
+        { wch: 18 },  // Successful Queries
+        { wch: 16 },  // Error Queries
+        { wch: 15 },  // Success Rate
+        { wch: 24 },  // Last Activity
+        { wch: 20 },  // Live Presence
+        { wch: 15 }   // Account Status
+      ];
+
+      const wb = XLSX.utils.book_new();
+
+      // Master sheet: All students sorted in ascending order of roll numbers
+      const allSorted = [...students].sort(naturalRollSort);
+      const allWs = XLSX.utils.json_to_sheet(allSorted.map(formatStudentRow));
+      allWs['!cols'] = colsWidth;
+      XLSX.utils.book_append_sheet(wb, allWs, 'All Students');
+
+      // Individual Branch sheets (CSE, ECE, EEE, MECH, etc.), each in ascending order of roll numbers
+      const branches = Array.from(new Set(students.map(s => (s.branch || 'General').trim()))).sort();
+      branches.forEach(branch => {
+        const branchStudents = students
+          .filter(s => (s.branch || 'General').trim() === branch)
+          .sort(naturalRollSort);
+
+        if (branchStudents.length > 0) {
+          const ws = XLSX.utils.json_to_sheet(branchStudents.map(formatStudentRow));
+          ws['!cols'] = colsWidth;
+          const cleanSheetName = branch.replace(/[:\\/?*\[\]]/g, '_').substring(0, 31);
+          XLSX.utils.book_append_sheet(wb, ws, cleanSheetName);
+        }
+      });
+
+      const today = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(wb, `Student_Performance_Report_${today}.xlsx`);
+      setStatusMsg({ type: 'success', text: `Downloaded Excel report with ${branches.length + 1} branch sheets!` });
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: 'Failed to generate Excel report: ' + (err.message || String(err)) });
+    }
+  };
+
+  // Export all student workout queries to Excel (.xlsx)
+  const handleExportWorkoutsExcel = () => {
+    if (!allWorkouts || allWorkouts.length === 0) {
+      setStatusMsg({ type: 'error', text: 'No workout queries available to export.' });
+      return;
+    }
+
+    try {
+      const rows = allWorkouts.map((w, idx) => {
+        const d = new Date(w.timestamp);
+        return {
+          'S.No': idx + 1,
+          'Roll Number': w.rollNumber,
+          'Query Command': w.command,
+          'Status': w.success ? 'Success' : 'Error',
+          'Execution Time (ms)': w.executionTime || 0,
+          'Output Message / Error': w.message || (w.error ? `Error: ${w.error}` : 'OK'),
+          'Timestamp': isNaN(d.getTime()) ? String(w.timestamp) : d.toLocaleString()
+        };
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [
+        { wch: 6 },
+        { wch: 18 },
+        { wch: 50 },
+        { wch: 10 },
+        { wch: 18 },
+        { wch: 35 },
+        { wch: 22 }
+      ];
+      XLSX.utils.book_append_sheet(wb, ws, 'All Queries');
+
+      const today = new Date().toISOString().split('T')[0];
+      XLSX.writeFile(wb, `Student_Workouts_All_${today}.xlsx`);
+      setStatusMsg({ type: 'success', text: `Exported ${allWorkouts.length} workout queries to Excel!` });
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: 'Failed to export queries: ' + (err.message || String(err)) });
     }
   };
 
@@ -675,6 +808,15 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
 
                 <button
                   type="button"
+                  className="btn-admin-export"
+                  onClick={handleExportBranchWiseExcel}
+                  title="Download branch-wise Excel (.xlsx) with roll numbers sorted in ascending order"
+                >
+                  📊 Export Branch-Wise Excel
+                </button>
+
+                <button
+                  type="button"
                   className="btn-admin-refresh"
                   onClick={fetchStudents}
                   title="Refresh Presence Now"
@@ -837,8 +979,16 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                 </span>
                 <button
                   type="button"
+                  className="btn-admin-export"
+                  onClick={handleExportWorkoutsExcel}
+                  title="Export all queries in Excel format (.xlsx)"
+                >
+                  📥 Export Queries (.xlsx)
+                </button>
+                <button
+                  type="button"
                   className="btn-admin-refresh"
-                  onClick={() => fetchWorkouts(workoutFilterRoll)}
+                  onClick={() => fetchWorkouts(workoutFilterRoll, false, workoutLimit)}
                   title="Refresh Workouts Now"
                 >
                   🔄 Refresh Feed
@@ -854,7 +1004,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                   onChange={e => {
                     const roll = e.target.value;
                     setWorkoutFilterRoll(roll);
-                    fetchWorkouts(roll);
+                    fetchWorkouts(roll, false, workoutLimit);
                   }}
                   className="admin-select-filter"
                 >
@@ -869,6 +1019,25 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                       </option>
                     );
                   })}
+                </select>
+              </div>
+
+              <div className="workouts-filter-group">
+                <label>Query Limit:</label>
+                <select
+                  value={workoutLimit}
+                  onChange={e => {
+                    const newLim = e.target.value;
+                    setWorkoutLimit(newLim);
+                    fetchWorkouts(workoutFilterRoll, false, newLim);
+                  }}
+                  className="admin-select-filter"
+                  title="Control how many queries are retrieved"
+                >
+                  <option value="all">⚡ Everything / All ({allWorkouts.length})</option>
+                  <option value="1000">Latest 1,000</option>
+                  <option value="500">Latest 500</option>
+                  <option value="250">Latest 250</option>
                 </select>
               </div>
 
