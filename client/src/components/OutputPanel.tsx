@@ -144,6 +144,32 @@ export function OutputPanel({ result, loading }: OutputPanelProps) {
           </div>
         )}
 
+        {/* Step-by-step multi-command sequence */}
+        {result.multipleResults && result.multipleResults.length > 1 && (
+          <div className="output-multi-results">
+            <div className="multi-results-header">
+              <span>Executed Sequence ({result.multipleResults.length} commands):</span>
+            </div>
+            {result.multipleResults.map((mr, idx) => (
+              <div key={idx} className={`multi-result-row ${mr.success ? 'success' : 'error'}`}>
+                <div className="multi-result-top">
+                  <span className="multi-result-step">Step {idx + 1}</span>
+                  <code className="multi-result-cmd">{mr.command}</code>
+                  <span className={`multi-result-status ${mr.success ? 'success' : 'error'}`}>
+                    {mr.success ? '✓' : '✗'}
+                  </span>
+                </div>
+                {mr.message && mr.success && (
+                  <div className="multi-result-msg success">{mr.message}</div>
+                )}
+                {mr.error && (
+                  <div className="multi-result-msg error">❌ {mr.error}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Error message */}
         {!result.success && result.error && (
           <div className="output-message error">

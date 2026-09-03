@@ -3003,4 +3003,92 @@ body {
   color: var(--text-primary);
 }
 
+/* ========================================
+   MULTI-COMMAND SEQUENCE IN OUTPUT PANEL
+   ======================================== */
+
+.output-multi-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+}
+
+.multi-results-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+}
+
+.multi-result-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+}
+.multi-result-row.success {
+  border-left: 3px solid var(--success);
+}
+.multi-result-row.error {
+  border-left: 3px solid var(--error);
+}
+
+.multi-result-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.multi-result-step {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.multi-result-cmd {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-result-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.multi-result-status.success {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+}
+.multi-result-status.error {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--error);
+}
+
+.multi-result-msg {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+.multi-result-msg.error {
+  color: var(--error);
+}
+
+
 

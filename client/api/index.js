@@ -4,6 +4,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 const JSON5 = require('json5');
 const { MongoClient, ObjectId } = require('mongodb');
+const vm = require('vm');
 
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://manideepjuvvala215_db_user:aeWhCDDKOpXeGg8b@cluster0.aqcfcn9.mongodb.net/?retryWrites=true&w=majority';
@@ -100,39 +101,118 @@ const DEFAULT_OPTIONS = {
   years: ['I Year', 'II Year', 'III Year', 'IV Year']
 };
 
-function parseMongoCommand(command) {
-  let cmd = command.trim().replace(/;\s*$/, '');
+function splitMongoCommands(script) {
+  const commands = [];
+  let depth = 0;
+  let inString = false;
+  let stringChar = '';
+  let inLineComment = false;
+  let inBlockComment = false;
+  let current = '';
 
-  const match = cmd.match(/^db\.(\w+)\.(\w+)\s*\(([\s\S]*)\)$/);
-  if (match) {
-    const [, collection, operation, argsStr] = match;
-    return { collection, operation, args: parseArgs(argsStr), chain: [] };
+  const str = script.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    const next = i + 1 < str.length ? str[i + 1] : '';
+    const prev = i > 0 ? str[i - 1] : '';
+
+    if (inLineComment) {
+      if (ch === '\n') inLineComment = false;
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (!inString) {
+      if (ch === '/' && next === '/') {
+        inLineComment = true;
+        i++;
+        continue;
+      }
+      if (ch === '/' && next === '*') {
+        inBlockComment = true;
+        i++;
+        continue;
+      }
+    }
+
+    if (inString) {
+      current += ch;
+      if (ch === stringChar && prev !== '\\') inString = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      inString = true;
+      stringChar = ch;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '(' || ch === '{' || ch === '[') {
+      depth++;
+      current += ch;
+      continue;
+    }
+    if (ch === ')' || ch === '}' || ch === ']') {
+      depth--;
+      current += ch;
+      continue;
+    }
+
+    if (ch === ';' && depth === 0) {
+      if (current.trim()) commands.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    if (ch === '\n' && depth === 0) {
+      const remaining = str.slice(i + 1).trimStart();
+      if (
+        remaining.startsWith('db.') ||
+        remaining.startsWith('show ') ||
+        remaining.startsWith('use ') ||
+        remaining.startsWith('help')
+      ) {
+        if (current.trim()) commands.push(current.trim());
+        current = '';
+        continue;
+      }
+    }
+
+    current += ch;
   }
 
-  const chainMatch = cmd.match(/^db\.(\w+)\.(\w+)\s*\(([\s\S]*?)\)\s*\.([\s\S]+)$/);
-  if (chainMatch) {
-    const [, collection, operation, argsStr, chainStr] = chainMatch;
-    return { collection, operation, args: parseArgs(argsStr), chain: parseChain(chainStr) };
-  }
-
-  const dbMatch = cmd.match(/^db\.(\w+)\s*\(([\s\S]*)\)$/);
-  if (dbMatch) {
-    const [, operation, argsStr] = dbMatch;
-    return { collection: '', operation, args: parseArgs(argsStr), chain: [] };
-  }
-
-  throw new Error('Invalid command format. Example: db.my_collection.find()');
+  if (current.trim()) commands.push(current.trim());
+  return commands;
 }
 
-function parseChain(chainStr) {
-  const methods = [];
-  const regex = /(\w+)\s*\(([\s\S]*?)\)/g;
-  let m;
-  while ((m = regex.exec(chainStr)) !== null) {
-    const [, method, argsStr] = m;
-    methods.push({ method, args: parseArgs(argsStr) });
+function parseMongoValue(val) {
+  const trimmed = val.trim();
+  if (!trimmed) return undefined;
+
+  try {
+    return JSON5.parse(trimmed);
+  } catch {
+    try {
+      const sandbox = {
+        ObjectId: (id) => id ? new ObjectId(id) : new ObjectId(),
+        ISODate: (d) => d ? new Date(d) : new Date(),
+        Date: Date,
+        NumberInt: (n) => parseInt(n, 10),
+        NumberLong: (n) => parseInt(n, 10),
+        NumberDecimal: (n) => parseFloat(n),
+        RegExp: RegExp
+      };
+      return vm.runInNewContext(`(${trimmed})`, sandbox, { timeout: 1000 });
+    } catch {
+      return trimmed;
+    }
   }
-  return methods;
 }
 
 function parseArgs(argsStr) {
@@ -155,12 +235,25 @@ function parseArgs(argsStr) {
       continue;
     }
 
-    if (ch === '"' || ch === "'") { inString = true; stringChar = ch; current += ch; continue; }
-    if (ch === '{' || ch === '[' || ch === '(') { depth++; current += ch; continue; }
-    if (ch === '}' || ch === ']' || ch === ')') { depth--; current += ch; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      inString = true;
+      stringChar = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '{' || ch === '[') {
+      depth++;
+      current += ch;
+      continue;
+    }
+    if (ch === ')' || ch === '}' || ch === ']') {
+      depth--;
+      current += ch;
+      continue;
+    }
 
     if (ch === ',' && depth === 0) {
-      if (current.trim()) args.push(parseValue(current.trim()));
+      if (current.trim()) args.push(parseMongoValue(current.trim()));
       current = '';
       continue;
     }
@@ -168,12 +261,113 @@ function parseArgs(argsStr) {
     current += ch;
   }
 
-  if (current.trim()) args.push(parseValue(current.trim()));
+  if (current.trim()) args.push(parseMongoValue(current.trim()));
   return args;
 }
 
-function parseValue(val) {
-  try { return JSON5.parse(val); } catch { return val; }
+function parseMongoCommand(commandStr) {
+  let cmd = commandStr.trim().replace(/;\s*$/, '');
+
+  if (!cmd.startsWith('db.')) {
+    throw new Error('Invalid command format. Commands must start with "db." (e.g. db.students.find())');
+  }
+
+  const parts = [];
+  let depth = 0;
+  let inString = false;
+  let stringChar = '';
+  let current = '';
+
+  const rest = cmd.slice(3);
+
+  for (let i = 0; i < rest.length; i++) {
+    const ch = rest[i];
+    const prev = i > 0 ? rest[i - 1] : '';
+
+    if (inString) {
+      current += ch;
+      if (ch === stringChar && prev !== '\\') inString = false;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'" || ch === '`') {
+      inString = true;
+      stringChar = ch;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '(' || ch === '{' || ch === '[') {
+      depth++;
+      current += ch;
+      continue;
+    }
+
+    if (ch === ')' || ch === '}' || ch === ']') {
+      depth--;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '.' && depth === 0) {
+      if (current.trim()) parts.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  if (parts.length === 0) {
+    throw new Error('Empty database command');
+  }
+
+  let collection = '';
+  let operation = '';
+  let args = [];
+  const chain = [];
+
+  let startIndex = 0;
+  if (parts[0].startsWith('getCollection(')) {
+    const m = parts[0].match(/^getCollection\(([\s\S]*)\)$/);
+    if (m) {
+      collection = m[1].replace(/^["'`]|["'`]$/g, '').trim();
+      startIndex = 1;
+    }
+  } else if (!parts[0].includes('(')) {
+    collection = parts[0];
+    startIndex = 1;
+  } else {
+    collection = '';
+    startIndex = 0;
+  }
+
+  if (startIndex >= parts.length) {
+    throw new Error(`Invalid command: incomplete expression after "db.${collection}"`);
+  }
+
+  const opPart = parts[startIndex];
+  const opMatch = opPart.match(/^(\w+)\s*\(([\s\S]*)\)$/);
+  if (!opMatch) {
+    throw new Error(`Invalid method call: ${opPart}`);
+  }
+
+  operation = opMatch[1];
+  args = parseArgs(opMatch[2]);
+
+  for (let i = startIndex + 1; i < parts.length; i++) {
+    const chainPart = parts[i];
+    const cMatch = chainPart.match(/^(\w+)\s*\(([\s\S]*)\)$/);
+    if (cMatch) {
+      chain.push({
+        method: cMatch[1],
+        args: parseArgs(cMatch[2])
+      });
+    }
+  }
+
+  return { collection, operation, args, chain };
 }
 
 const router = express.Router();
@@ -703,25 +897,8 @@ router.delete('/admin/students/:id', async (req, res) => {
   }
 });
 
-// 7. Execute MongoDB Command
-router.post('/execute', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
-  const session = parseToken(token);
-
-  if (!session) {
-    res.status(401).json({ success: false, error: 'Please sign in to execute MongoDB commands.', executionTime: 0 });
-    return;
-  }
-
-  const { command, targetDb: overrideDb } = req.body;
-  if (!command || typeof command !== 'string' || !command.trim()) {
-    res.json({ success: false, error: 'No command provided.', executionTime: 0 });
-    return;
-  }
-
+async function executeSingleCommand(cmdStr, session, overrideDb) {
   const startTime = Date.now();
-  const cmdStr = command.trim().replace(/;\s*$/, '');
   const lowerCmd = cmdStr.toLowerCase();
 
   try {
@@ -734,6 +911,7 @@ router.post('/execute', async (req, res) => {
     let message = 'Executed successfully';
     let documentCount;
 
+    // 1. Show Databases
     if (lowerCmd === 'show dbs' || lowerCmd === 'show databases') {
       if (session.isAdmin) {
         try {
@@ -750,27 +928,31 @@ router.post('/execute', async (req, res) => {
         message = 'Command executed successfully';
       }
     }
+    // 2. Show Collections
     else if (lowerCmd === 'show collections' || lowerCmd === 'show tables') {
       const collections = await db.listCollections().toArray();
       const names = collections.map(c => c.name).filter(n => !n.startsWith('system.'));
       result = names.length > 0 ? names.join('\n') : '(No collections found)';
       message = `Found ${names.length} collection(s) in "${activeDbName}"`;
     }
+    // 3. Show Current Database
     else if (lowerCmd === 'db') {
       result = activeDbName;
       message = `Active Database: ${activeDbName}`;
     }
+    // 4. Show Users
     else if (lowerCmd === 'show users') {
       const usersColl = mongoClient.db('manideep_practice_app').collection('users');
       result = await usersColl.find({}, { projection: { password: 0 } }).toArray();
       message = `Found ${result.length} user(s)`;
     }
+    // 5. Help
     else if (lowerCmd === 'help' || lowerCmd === 'db.help()') {
       result = `MongoDB Shell Help & Commands Reference:
 • db.createCollection("<name>") — Create a new collection
 • db.<coll>.insertOne({ ... }) — Insert a single document
 • db.<coll>.insertMany([ { ... } ]) — Insert multiple documents
-• db.<coll>.find(<filter>, <proj>) — Query documents
+• db.<coll>.find(<filter>, <proj>).sort({ field: 1 }).limit(n) — Query & sort documents
 • db.<coll>.findOne(<filter>) — Find one matching document
 • db.<coll>.updateOne(<filter>, <update>) — Update one document
 • db.<coll>.updateMany(<filter>, <update>) — Update multiple documents
@@ -783,6 +965,7 @@ router.post('/execute', async (req, res) => {
 • db.stats() — Database statistics`;
       message = 'Help documentation displayed';
     }
+    // 6. Switch Database
     else if (lowerCmd.startsWith('use ')) {
       const targetDb = cmdStr.substring(4).trim();
       activeDbName = targetDb;
@@ -790,10 +973,12 @@ router.post('/execute', async (req, res) => {
       result = `switched to db ${targetDb}`;
       message = `Active database: ${targetDb}`;
     }
+    // 7. Server Status / Info
     else if (lowerCmd === 'db.serverstatus()' || lowerCmd === 'db.serverbuildinfo()') {
       result = { host: 'cluster0.aqcfcn9.mongodb.net', version: '7.0.12', process: 'mongod', ok: 1 };
       message = 'Server information fetched from Atlas';
     }
+    // 8. Database level ops
     else if (cmdStr.startsWith('db.createCollection')) {
       const parsed = parseMongoCommand(cmdStr);
       const collName = parsed.args[0];
@@ -805,7 +990,9 @@ router.post('/execute', async (req, res) => {
     }
     else if (cmdStr.startsWith('db.runCommand')) {
       const parsed = parseMongoCommand(cmdStr);
-      result = await db.command(parsed.args[0]);
+      const commandObj = parsed.args[0];
+      if (!commandObj) throw new Error('runCommand requires a command object');
+      result = await db.command(commandObj);
       message = 'Database command executed';
     }
     else if (cmdStr.startsWith('db.stats')) {
@@ -819,7 +1006,8 @@ router.post('/execute', async (req, res) => {
     }
     else if (cmdStr.startsWith('db.createUser')) {
       const parsed = parseMongoCommand(cmdStr);
-      result = { ok: 1, user: parsed.args[0]?.user || 'created' };
+      const userObj = parsed.args[0];
+      result = { ok: 1, user: userObj?.user || 'created' };
       message = 'User created successfully';
     }
     else if (cmdStr.startsWith('db.dropUser')) {
@@ -827,20 +1015,31 @@ router.post('/execute', async (req, res) => {
       result = { ok: 1, user: parsed.args[0] };
       message = `User "${parsed.args[0]}" dropped`;
     }
+    else if (cmdStr.startsWith('db.getCollectionNames') || cmdStr.startsWith('db.listCollections')) {
+      const collections = await db.listCollections().toArray();
+      result = collections.map(c => c.name);
+      message = `Found ${result.length} collection(s)`;
+    }
+    // 9. Collection & Query level operations
     else {
       const { collection: collName, operation, args, chain } = parseMongoCommand(cmdStr);
-      if (!collName && operation !== 'help') throw new Error(`Unsupported database command: ${cmdStr}`);
+
+      if (!collName && operation !== 'help') {
+        throw new Error(`Unsupported database command: ${cmdStr}`);
+      }
 
       const collection = db.collection(collName);
 
       switch (operation) {
-        case 'help':
+        case 'help': {
           result = `Collection methods for db.${collName}:\n• find(), findOne()\n• insertOne(), insertMany()\n• updateOne(), updateMany(), replaceOne()\n• deleteOne(), deleteMany()\n• aggregate()\n• createIndex(), getIndexes(), dropIndex()\n• stats(), drop()`;
           message = `Help for collection ${collName}`;
           break;
+        }
 
         case 'createCollection': {
           const targetName = (args[0] && typeof args[0] === 'string') ? args[0] : collName;
+          if (!targetName) throw new Error('createCollection requires a collection name string');
           await db.createCollection(targetName, args[1] || {});
           result = { ok: 1 };
           message = `Collection "${targetName}" created successfully on Atlas (${activeDbName})`;
@@ -856,6 +1055,12 @@ router.post('/execute', async (req, res) => {
             if (cm.method === 'sort' && cm.args[0]) cursor = cursor.sort(cm.args[0]);
             if (cm.method === 'limit' && cm.args[0] !== undefined) cursor = cursor.limit(cm.args[0]);
             if (cm.method === 'skip' && cm.args[0] !== undefined) cursor = cursor.skip(cm.args[0]);
+            if (cm.method === 'count' || cm.method === 'countDocuments') {
+              const allDocs = await cursor.toArray();
+              result = allDocs.length;
+              message = `Count: ${result}`;
+              break;
+            }
             if (cm.method === 'explain') {
               result = await cursor.explain(cm.args[0] || 'queryPlanner');
               message = 'Query explain execution plan fetched';
@@ -863,7 +1068,7 @@ router.post('/execute', async (req, res) => {
             }
           }
 
-          if (!result) {
+          if (result === undefined) {
             result = await cursor.toArray();
             documentCount = result.length;
             message = `Found ${result.length} document(s)`;
@@ -877,6 +1082,32 @@ router.post('/execute', async (req, res) => {
           result = await collection.findOne(filter, projection);
           documentCount = result ? 1 : 0;
           message = result ? 'Found 1 document' : 'No document found';
+          break;
+        }
+
+        case 'findOneAndUpdate': {
+          const filter = args[0] || {};
+          const update = args[1];
+          const options = args[2] || {};
+          result = await collection.findOneAndUpdate(filter, update, options);
+          message = 'findOneAndUpdate executed';
+          break;
+        }
+
+        case 'findOneAndDelete': {
+          const filter = args[0] || {};
+          const options = args[1] || {};
+          result = await collection.findOneAndDelete(filter, options);
+          message = 'findOneAndDelete executed';
+          break;
+        }
+
+        case 'findOneAndReplace': {
+          const filter = args[0] || {};
+          const replacement = args[1];
+          const options = args[2] || {};
+          result = await collection.findOneAndReplace(filter, replacement, options);
+          message = 'findOneAndReplace executed';
           break;
         }
 
@@ -901,8 +1132,9 @@ router.post('/execute', async (req, res) => {
         case 'updateOne': {
           const filter = args[0] || {};
           const update = args[1];
+          const options = args[2] || {};
           if (!update) throw new Error('updateOne requires filter and update arguments');
-          const res = await collection.updateOne(filter, update, args[2] || {});
+          const res = await collection.updateOne(filter, update, options);
           result = { acknowledged: res.acknowledged, matchedCount: res.matchedCount, modifiedCount: res.modifiedCount, upsertedId: res.upsertedId };
           message = `Matched ${res.matchedCount}, modified ${res.modifiedCount} document(s)`;
           break;
@@ -911,8 +1143,9 @@ router.post('/execute', async (req, res) => {
         case 'updateMany': {
           const filter = args[0] || {};
           const update = args[1];
+          const options = args[2] || {};
           if (!update) throw new Error('updateMany requires filter and update arguments');
-          const res = await collection.updateMany(filter, update, args[2] || {});
+          const res = await collection.updateMany(filter, update, options);
           result = { acknowledged: res.acknowledged, matchedCount: res.matchedCount, modifiedCount: res.modifiedCount, upsertedId: res.upsertedId };
           message = `Matched ${res.matchedCount}, modified ${res.modifiedCount} document(s)`;
           break;
@@ -921,8 +1154,9 @@ router.post('/execute', async (req, res) => {
         case 'replaceOne': {
           const filter = args[0] || {};
           const replacement = args[1];
+          const options = args[2] || {};
           if (!replacement) throw new Error('replaceOne requires filter and replacement arguments');
-          const res = await collection.replaceOne(filter, replacement, args[2] || {});
+          const res = await collection.replaceOne(filter, replacement, options);
           result = { acknowledged: res.acknowledged, matchedCount: res.matchedCount, modifiedCount: res.modifiedCount };
           message = `Replaced document on Atlas`;
           break;
@@ -944,6 +1178,15 @@ router.post('/execute', async (req, res) => {
           break;
         }
 
+        case 'bulkWrite': {
+          const ops = args[0];
+          if (!Array.isArray(ops)) throw new Error('bulkWrite requires an array of operations');
+          const res = await collection.bulkWrite(ops, args[1] || {});
+          result = res;
+          message = `Bulk write executed (${res.insertedCount || 0} inserted, ${res.modifiedCount || 0} modified, ${res.deletedCount || 0} deleted)`;
+          break;
+        }
+
         case 'aggregate': {
           const pipeline = args[0];
           if (!pipeline || !Array.isArray(pipeline)) throw new Error('aggregate requires a pipeline array');
@@ -953,16 +1196,19 @@ router.post('/execute', async (req, res) => {
           break;
         }
 
-        case 'countDocuments': {
-          result = await collection.countDocuments(args[0] || {});
+        case 'countDocuments':
+        case 'count': {
+          const filter = args[0] || {};
+          result = await collection.countDocuments(filter);
           message = `Count: ${result}`;
           break;
         }
 
         case 'distinct': {
           const field = args[0];
+          const filter = args[1] || {};
           if (!field) throw new Error('distinct requires a field name string');
-          result = await collection.distinct(field, args[1] || {});
+          result = await collection.distinct(field, filter);
           message = `Found ${result.length} distinct value(s)`;
           break;
         }
@@ -1026,7 +1272,6 @@ router.post('/execute', async (req, res) => {
 
     const executionTime = Date.now() - startTime;
 
-    // Save execution history to MongoDB permanently
     try {
       const appDb = mongoClient.db('manideep_practice_app');
       await appDb.collection('command_histories').insertOne({
@@ -1040,18 +1285,18 @@ router.post('/execute', async (req, res) => {
       });
     } catch {}
 
-    res.json({
+    return {
       success: true,
+      command: cmdStr,
       result,
       message,
       documentCount,
       executionTime
-    });
+    };
 
   } catch (error) {
     const executionTime = Date.now() - startTime;
 
-    // Save failed execution history to MongoDB permanently
     try {
       const mongoClient = await getMongoClient();
       const appDb = mongoClient.db('manideep_practice_app');
@@ -1065,12 +1310,73 @@ router.post('/execute', async (req, res) => {
       });
     } catch {}
 
-    res.json({
+    return {
       success: false,
+      command: cmdStr,
       error: error.message || String(error),
       executionTime
-    });
+    };
   }
+}
+
+// 7. Execute MongoDB Command
+router.post('/execute', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+  const session = parseToken(token);
+
+  if (!session) {
+    res.status(401).json({ success: false, error: 'Please sign in to execute MongoDB commands.', executionTime: 0 });
+    return;
+  }
+
+  const { command, targetDb: overrideDb } = req.body;
+  if (!command || typeof command !== 'string' || !command.trim()) {
+    res.json({ success: false, error: 'No command provided.', executionTime: 0 });
+    return;
+  }
+
+  const commands = splitMongoCommands(command);
+  if (commands.length === 0) {
+    res.json({ success: false, error: 'No valid command found.', executionTime: 0 });
+    return;
+  }
+
+  // Single command execution
+  if (commands.length === 1) {
+    const outcome = await executeSingleCommand(commands[0], session, overrideDb);
+    res.json(outcome);
+    return;
+  }
+
+  // Multi-command sequential execution
+  const totalStart = Date.now();
+  const multipleResults = [];
+  let lastResult = null;
+  let allSuccess = true;
+  let successCount = 0;
+
+  for (const cmd of commands) {
+    const outcome = await executeSingleCommand(cmd, session, overrideDb);
+    multipleResults.push(outcome);
+    if (outcome.success) {
+      successCount++;
+      lastResult = outcome.result;
+    } else {
+      allSuccess = false;
+    }
+  }
+
+  const totalTime = Date.now() - totalStart;
+
+  res.json({
+    success: allSuccess,
+    command: commands.join(';\n'),
+    message: `Executed ${successCount}/${commands.length} command(s) successfully`,
+    result: lastResult !== null ? lastResult : multipleResults.map(r => r.result || r.message || r.error),
+    multipleResults,
+    executionTime: totalTime
+  });
 });
 
 router.get('/history', async (req, res) => {

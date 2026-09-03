@@ -29,6 +29,14 @@ export interface ExecutionResult {
   message?: string;
   documentCount?: number;
   executionTime: number;
+  multipleResults?: Array<{
+    command: string;
+    success: boolean;
+    result?: any;
+    message?: string;
+    error?: string;
+    executionTime?: number;
+  }>;
   validation?: {
     correct: boolean;
     message: string;

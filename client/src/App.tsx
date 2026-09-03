@@ -50,14 +50,23 @@ function App() {
   const runCommandNow = useCallback(async (command: string) => {
     const res = await executeCommand(command);
 
-    const newEntry: CommandHistoryEntry = {
-      id: Date.now().toString(),
-      command,
-      timestamp: new Date(),
-      success: res.success,
-    };
-
-    setCommandHistory(prev => [newEntry, ...prev]);
+    if (res.multipleResults && res.multipleResults.length > 1) {
+      const entries: CommandHistoryEntry[] = res.multipleResults.map((mr, idx) => ({
+        id: `${Date.now()}_${idx}`,
+        command: mr.command,
+        timestamp: new Date(),
+        success: mr.success,
+      }));
+      setCommandHistory(prev => [...entries.reverse(), ...prev]);
+    } else {
+      const newEntry: CommandHistoryEntry = {
+        id: Date.now().toString(),
+        command,
+        timestamp: new Date(),
+        success: res.success,
+      };
+      setCommandHistory(prev => [newEntry, ...prev]);
+    }
 
     fetchCollections();
   }, [executeCommand, fetchCollections]);
