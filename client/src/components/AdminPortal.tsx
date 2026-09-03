@@ -22,12 +22,48 @@ interface Student {
   presenceStatus?: 'online' | 'idle' | 'offline';
   idleMinutes?: number;
   lastActiveTime?: string;
+  workout?: {
+    total: number;
+    success: number;
+    failed: number;
+    lastWorkoutTime?: string | null;
+  };
+}
+
+function formatTimeAgo(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  const now = Date.now();
+  const past = new Date(dateStr).getTime();
+  const diffSec = Math.floor((now - past) / 1000);
+  if (diffSec < 60) return `${Math.max(1, diffSec)}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
+function formatDayLabel(date: Date): string {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+  if (target.getTime() === today.getTime()) {
+    return `Today — ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  }
+  if (target.getTime() === yesterday.getTime()) {
+    return `Yesterday — ${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  }
+  return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [options, setOptions] = useState<DropdownOptions>({ colleges: [], branches: [], years: [] });
   const [students, setStudents] = useState<Student[]>([]);
-  const [activeTab, setActiveTab] = useState<'options' | 'students' | 'playground'>('options');
+  const [activeTab, setActiveTab] = useState<'options' | 'students' | 'workouts' | 'playground'>('students');
   
   // Options management form state
   const [newCollege, setNewCollege] = useState('');
@@ -47,6 +83,18 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [studentHistory, setStudentHistory] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
+  const [historyFilterStatus, setHistoryFilterStatus] = useState<'all' | 'success' | 'fail'>('all');
+  const [expandedHistoryIds, setExpandedHistoryIds] = useState<Record<string, boolean>>({});
+  const [historyCopiedId, setHistoryCopiedId] = useState<string | null>(null);
+
+  // Dedicated Live Workouts Feed state
+  const [allWorkouts, setAllWorkouts] = useState<any[]>([]);
+  const [workoutsLoading, setWorkoutsLoading] = useState(false);
+  const [workoutFilterRoll, setWorkoutFilterRoll] = useState('all');
+  const [workoutFilterStatus, setWorkoutFilterStatus] = useState<'all' | 'success' | 'fail'>('all');
+  const [workoutSearch, setWorkoutSearch] = useState('');
+  const [expandedWorkoutIds, setExpandedWorkoutIds] = useState<Record<string, boolean>>({});
+  const [workoutCopiedId, setWorkoutCopiedId] = useState<string | null>(null);
 
   const [adminDbName, setAdminDbName] = useState('user_db_22kt1a4245');
   const [adminCommand, setAdminCommand] = useState('show dbs');
@@ -74,6 +122,22 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       .catch(() => {});
   }, [token]);
 
+  const fetchWorkouts = useCallback((roll = 'all') => {
+    setWorkoutsLoading(true);
+    const q = roll && roll !== 'all' ? `?roll=${encodeURIComponent(roll)}&limit=250` : '?limit=250';
+    fetch(`${API_BASE}/admin/workouts${q}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.workouts)) {
+          setAllWorkouts(data.workouts);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setWorkoutsLoading(false));
+  }, [token]);
+
   useEffect(() => {
     fetchOptions();
     fetchStudents();
@@ -87,10 +151,21 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
     }
   }, [activeTab, token, fetchStudents]);
 
+  // Live real-time workout stream polling every 8 seconds while in Workouts tab
+  useEffect(() => {
+    if (activeTab === 'workouts' && token) {
+      fetchWorkouts(workoutFilterRoll);
+      const interval = setInterval(() => fetchWorkouts(workoutFilterRoll), 8000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, workoutFilterRoll, token, fetchWorkouts]);
+
   const handleViewStudentHistory = async (student: Student) => {
     setHistoryStudent(student);
     setHistoryLoading(true);
     setHistorySearch('');
+    setHistoryFilterStatus('all');
+    setExpandedHistoryIds({});
     try {
       const res = await fetch(`${API_BASE}/admin/students/${student.rollNumber}/history`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -290,13 +365,22 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
           className={`admin-tab ${activeTab === 'options' ? 'active' : ''}`}
           onClick={() => setActiveTab('options')}
         >
-          Manage Dropdown Options
+          🏢 Dropdown Options
         </button>
         <button
           className={`admin-tab ${activeTab === 'students' ? 'active' : ''}`}
           onClick={() => setActiveTab('students')}
         >
-          Registered Students ({students.length})
+          👥 Registered Students ({students.length})
+        </button>
+        <button
+          className={`admin-tab ${activeTab === 'workouts' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('workouts');
+            fetchWorkouts(workoutFilterRoll);
+          }}
+        >
+          🏋️ Student Workouts (Live Feed)
         </button>
         <button
           className={`admin-tab ${activeTab === 'playground' ? 'active' : ''}`}
@@ -337,11 +421,11 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
 
           {/* Branches */}
           <div className="admin-card">
-            <h3>🎓 Branches</h3>
+            <h3>🎓 Engineering Branches</h3>
             <div className="admin-input-group">
               <input
                 type="text"
-                placeholder="Add new branch (e.g. CSE)..."
+                placeholder="Add new branch..."
                 value={newBranch}
                 onChange={e => setNewBranch(e.target.value)}
               />
@@ -368,7 +452,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
             <div className="admin-input-group">
               <input
                 type="text"
-                placeholder="Add new year (e.g. V Year)..."
+                placeholder="Add new academic year..."
                 value={newYear}
                 onChange={e => setNewYear(e.target.value)}
               />
@@ -430,7 +514,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
 
           <div className="admin-table-card">
             <div className="admin-table-card-header">
-              <h3>👥 Registered Students & Live Activity Monitoring</h3>
+              <h3>👥 Registered Students &amp; Live Activity Monitoring</h3>
               <div className="admin-table-header-actions">
                 <span className="live-refresh-note">
                   <span className="live-ping-small" /> Live Monitoring (auto-refresh 12s)
@@ -455,6 +539,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                     <th>College Name</th>
                     <th>Branch / Year</th>
                     <th>Live Presence</th>
+                    <th>🏋️ Workout Activity</th>
                     <th>Account</th>
                     <th>Atlas Sandbox DB</th>
                     <th>Actions</th>
@@ -463,6 +548,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                 <tbody>
                   {students.map(s => {
                     const status = s.presenceStatus || 'offline';
+                    const hasWorkout = s.workout && s.workout.total > 0;
                     return (
                       <tr key={s._id} className={`${s.isDisabled ? 'row-student-disabled' : ''} row-presence-${status}`}>
                         <td><strong>{s.rollNumber}</strong></td>
@@ -493,6 +579,26 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                           )}
                         </td>
                         <td>
+                          {hasWorkout ? (
+                            <div className="student-workout-cell">
+                              <div className="workout-summary-badge active">
+                                <strong>{s.workout!.total}</strong> command{s.workout!.total !== 1 ? 's' : ''}
+                              </div>
+                              <div className="workout-mini-stats">
+                                <span className="mini-success">✓ {s.workout!.success}</span>
+                                <span className="mini-fail">✗ {s.workout!.failed}</span>
+                                {s.workout!.lastWorkoutTime && (
+                                  <span className="mini-time">• {formatTimeAgo(s.workout!.lastWorkoutTime)}</span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="workout-summary-badge empty">
+                              ○ No commands run
+                            </span>
+                          )}
+                        </td>
+                        <td>
                           <span className={`badge-status ${s.isDisabled ? 'disabled' : 'active'}`}>
                             {s.isDisabled ? '🚫 Disabled' : '● Active'}
                           </span>
@@ -504,9 +610,9 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                               type="button"
                               className="btn-student-history"
                               onClick={() => handleViewStudentHistory(s)}
-                              title={`View ${s.rollNumber}'s complete command execution history`}
+                              title={`View full workout command history for ${s.rollNumber}`}
                             >
-                              📜 History
+                              📜 History ({s.workout?.total || 0})
                             </button>
                             <button
                               type="button"
@@ -547,8 +653,179 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
             </div>
           </div>
         </div>
+      ) : activeTab === 'workouts' ? (
+        /* TAB 3: Dedicated Real-Time Student Workouts Feed */
+        <div className="admin-workouts-feed-section">
+          <div className="admin-workouts-toolbar-card">
+            <div className="workouts-toolbar-header">
+              <div className="workouts-toolbar-title">
+                <h3>🏋️ Real-Time Student Workout Stream</h3>
+                <p>Live chronological feed of all MongoDB commands executed across student sandboxes</p>
+              </div>
+              <div className="workouts-toolbar-actions">
+                <span className="live-refresh-note">
+                  <span className="live-ping-small" /> Live Stream (auto-refresh 8s)
+                </span>
+                <button
+                  type="button"
+                  className="btn-admin-refresh"
+                  onClick={() => fetchWorkouts(workoutFilterRoll)}
+                  title="Refresh Workouts Now"
+                >
+                  🔄 Refresh Feed
+                </button>
+              </div>
+            </div>
+
+            <div className="workouts-filter-row">
+              <div className="workouts-filter-group">
+                <label>Filter by Student:</label>
+                <select
+                  value={workoutFilterRoll}
+                  onChange={e => {
+                    const roll = e.target.value;
+                    setWorkoutFilterRoll(roll);
+                    fetchWorkouts(roll);
+                  }}
+                  className="admin-select-filter"
+                >
+                  <option value="all">👥 All Students ({allWorkouts.length} queries)</option>
+                  {students.map(s => (
+                    <option key={s._id} value={s.rollNumber}>
+                      {s.rollNumber} — {s.collegeName || ''} ({s.workout?.total || 0} cmds)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="workouts-status-pills">
+                <button
+                  type="button"
+                  className={`status-pill ${workoutFilterStatus === 'all' ? 'active' : ''}`}
+                  onClick={() => setWorkoutFilterStatus('all')}
+                >
+                  All ({allWorkouts.length})
+                </button>
+                <button
+                  type="button"
+                  className={`status-pill success ${workoutFilterStatus === 'success' ? 'active' : ''}`}
+                  onClick={() => setWorkoutFilterStatus('success')}
+                >
+                  ✓ Succeeded ({allWorkouts.filter(w => w.success).length})
+                </button>
+                <button
+                  type="button"
+                  className={`status-pill fail ${workoutFilterStatus === 'fail' ? 'active' : ''}`}
+                  onClick={() => setWorkoutFilterStatus('fail')}
+                >
+                  ✗ Errors ({allWorkouts.filter(w => !w.success).length})
+                </button>
+              </div>
+
+              <div className="workouts-search-box">
+                <input
+                  type="text"
+                  placeholder="Search commands or collections..."
+                  value={workoutSearch}
+                  onChange={e => setWorkoutSearch(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-workouts-stream-card">
+            {workoutsLoading && allWorkouts.length === 0 ? (
+              <div className="history-modal-loading">
+                <div className="loading-dots"><span /><span /><span /></div>
+                <p>Loading real-time student workout stream...</p>
+              </div>
+            ) : allWorkouts.length === 0 ? (
+              <div className="history-modal-empty">
+                <p>No student workout commands recorded yet.</p>
+              </div>
+            ) : (
+              <div className="workouts-feed-list">
+                {allWorkouts
+                  .filter(item => {
+                    if (workoutFilterStatus === 'success' && !item.success) return false;
+                    if (workoutFilterStatus === 'fail' && item.success) return false;
+                    if (workoutSearch && !item.command.toLowerCase().includes(workoutSearch.toLowerCase()) && !String(item.rollNumber).toLowerCase().includes(workoutSearch.toLowerCase())) return false;
+                    return true;
+                  })
+                  .map((item, idx) => {
+                    const dt = new Date(item.timestamp);
+                    const isExpanded = !!expandedWorkoutIds[item._id || idx];
+                    const lines = item.command.split('\n');
+                    const isLong = lines.length > 4 || item.command.length > 220;
+                    const previewText = isLong && !isExpanded ? lines.slice(0, 4).join('\n') + '\n...' : item.command;
+                    const isCopied = workoutCopiedId === (item._id || String(idx));
+
+                    return (
+                      <div key={item._id || idx} className={`workout-feed-item ${item.success ? 'success' : 'error'}`}>
+                        <div className="workout-feed-top">
+                          <div className="workout-feed-student">
+                            <span className="workout-roll-badge">{item.rollNumber}</span>
+                            <span className="workout-time-ago">{formatTimeAgo(item.timestamp)}</span>
+                            <span className="workout-time-exact">({dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})</span>
+                          </div>
+
+                          <div className="workout-feed-meta">
+                            {item.executionTime !== undefined && (
+                              <span className="workout-duration">⏱️ {item.executionTime}ms</span>
+                            )}
+                            {item.documentCount !== undefined && (
+                              <span className="workout-doc-count">📄 {item.documentCount} doc(s)</span>
+                            )}
+                            <span className={`workout-status-badge ${item.success ? 'success' : 'error'}`}>
+                              {item.success ? '✓ Succeeded' : '✗ Failed'}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn-copy-code"
+                              onClick={() => {
+                                navigator.clipboard.writeText(item.command);
+                                setWorkoutCopiedId(item._id || String(idx));
+                                setTimeout(() => setWorkoutCopiedId(null), 1500);
+                              }}
+                              title="Copy command"
+                            >
+                              {isCopied ? 'Copied!' : 'Copy'}
+                            </button>
+                          </div>
+                        </div>
+
+                        <pre className="workout-code-block">{previewText}</pre>
+
+                        {isLong && (
+                          <button
+                            type="button"
+                            className="btn-expand-code"
+                            onClick={() => setExpandedWorkoutIds(prev => ({ ...prev, [item._id || idx]: !prev[item._id || idx] }))}
+                          >
+                            {isExpanded ? '▲ Collapse command' : `▼ Show full command (${lines.length} lines)`}
+                          </button>
+                        )}
+
+                        {item.message && item.success && (
+                          <div className="workout-outcome-msg success">
+                            ✓ {item.message}
+                          </div>
+                        )}
+
+                        {item.error && (
+                          <div className="workout-outcome-msg error">
+                            ❌ Error: {item.error}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
-        /* TAB 3: Embedded Admin MongoDB Command Execution Stage */
+        /* TAB 4: Embedded Admin MongoDB Command Execution Stage */
         <div className="admin-cmd-stage">
           <div className="admin-cmd-header">
             <div className="admin-db-selector">
@@ -672,13 +949,13 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
         onCancel={() => setPendingDeleteCmd(null)}
       />
 
-      {/* Student Command History Inspection Modal */}
+      {/* Upgraded Student Command History Inspection Modal */}
       {historyStudent && (
         <div className="modal-overlay" onClick={() => setHistoryStudent(null)}>
           <div className="modal-card modal-student-history" onClick={e => e.stopPropagation()}>
             <div className="modal-history-header">
               <div className="modal-history-title-group">
-                <h3>📜 Command History: {historyStudent.rollNumber}</h3>
+                <h3>📜 Workout History: {historyStudent.rollNumber}</h3>
                 <div className="modal-history-student-meta">
                   <span className="meta-pill">{historyStudent.collegeName || 'N/A'}</span>
                   <span className="meta-pill">{historyStudent.branch || 'N/A'}</span>
@@ -697,6 +974,30 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
               </button>
             </div>
 
+            {/* Workout Summary Metric Cards in Modal */}
+            <div className="modal-workout-stats-banner">
+              <div className="modal-stat-pill total">
+                <span className="label">Total Commands</span>
+                <span className="val">{studentHistory.length}</span>
+              </div>
+              <div className="modal-stat-pill success">
+                <span className="label">Succeeded</span>
+                <span className="val">{studentHistory.filter(h => h.success).length}</span>
+              </div>
+              <div className="modal-stat-pill fail">
+                <span className="label">Failed</span>
+                <span className="val">{studentHistory.filter(h => !h.success).length}</span>
+              </div>
+              {studentHistory.length > 0 && (
+                <div className="modal-stat-pill rate">
+                  <span className="label">Success Rate</span>
+                  <span className="val">
+                    {Math.round((studentHistory.filter(h => h.success).length / studentHistory.length) * 100)}%
+                  </span>
+                </div>
+              )}
+            </div>
+
             <div className="modal-history-toolbar">
               <input
                 type="text"
@@ -705,9 +1006,30 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                 value={historySearch}
                 onChange={e => setHistorySearch(e.target.value)}
               />
-              <span className="modal-history-badge">
-                {studentHistory.length} command{studentHistory.length !== 1 ? 's' : ''} executed
-              </span>
+
+              <div className="workouts-status-pills">
+                <button
+                  type="button"
+                  className={`status-pill ${historyFilterStatus === 'all' ? 'active' : ''}`}
+                  onClick={() => setHistoryFilterStatus('all')}
+                >
+                  All ({studentHistory.length})
+                </button>
+                <button
+                  type="button"
+                  className={`status-pill success ${historyFilterStatus === 'success' ? 'active' : ''}`}
+                  onClick={() => setHistoryFilterStatus('success')}
+                >
+                  ✓ Success ({studentHistory.filter(h => h.success).length})
+                </button>
+                <button
+                  type="button"
+                  className={`status-pill fail ${historyFilterStatus === 'fail' ? 'active' : ''}`}
+                  onClick={() => setHistoryFilterStatus('fail')}
+                >
+                  ✗ Errors ({studentHistory.filter(h => !h.success).length})
+                </button>
+              </div>
             </div>
 
             <div className="modal-history-body">
@@ -718,7 +1040,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                     <span />
                     <span />
                   </div>
-                  <p>Loading command history for {historyStudent.rollNumber}...</p>
+                  <p>Loading workout history for {historyStudent.rollNumber}...</p>
                 </div>
               ) : studentHistory.length === 0 ? (
                 <div className="history-modal-empty">
@@ -727,28 +1049,72 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
               ) : (
                 <div className="modal-history-list">
                   {studentHistory
-                    .filter(item => !historySearch || item.command.toLowerCase().includes(historySearch.toLowerCase()))
+                    .filter(item => {
+                      if (historyFilterStatus === 'success' && !item.success) return false;
+                      if (historyFilterStatus === 'fail' && item.success) return false;
+                      if (historySearch && !item.command.toLowerCase().includes(historySearch.toLowerCase())) return false;
+                      return true;
+                    })
                     .map((item, idx) => {
                       const dt = new Date(item.timestamp);
+                      const isExpanded = !!expandedHistoryIds[item._id || idx];
+                      const lines = item.command.split('\n');
+                      const isLong = lines.length > 4 || item.command.length > 220;
+                      const previewText = isLong && !isExpanded ? lines.slice(0, 4).join('\n') + '\n...' : item.command;
+                      const isCopied = historyCopiedId === (item._id || String(idx));
+
                       return (
                         <div key={item._id || idx} className={`modal-history-item ${item.success ? 'success' : 'error'}`}>
                           <div className="history-item-top">
                             <span className="history-item-time">
-                              📅 {dt.toLocaleDateString()} at {dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              📅 {formatDayLabel(dt)} at {dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                             </span>
                             <div className="history-item-badges">
                               {item.executionTime !== undefined && (
                                 <span className="history-item-duration">{item.executionTime}ms</span>
                               )}
+                              {item.documentCount !== undefined && (
+                                <span className="history-item-doc-count">📄 {item.documentCount} doc(s)</span>
+                              )}
                               <span className={`history-item-status ${item.success ? 'success' : 'error'}`}>
                                 {item.success ? '✓ Succeeded' : '✗ Failed'}
                               </span>
+                              <button
+                                type="button"
+                                className="btn-copy-code"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(item.command);
+                                  setHistoryCopiedId(item._id || String(idx));
+                                  setTimeout(() => setHistoryCopiedId(null), 1500);
+                                }}
+                                title="Copy command"
+                              >
+                                {isCopied ? 'Copied!' : 'Copy'}
+                              </button>
                             </div>
                           </div>
-                          <pre className="history-item-code">{item.command}</pre>
+
+                          <pre className="history-item-code">{previewText}</pre>
+
+                          {isLong && (
+                            <button
+                              type="button"
+                              className="btn-expand-code"
+                              onClick={() => setExpandedHistoryIds(prev => ({ ...prev, [item._id || idx]: !prev[item._id || idx] }))}
+                            >
+                              {isExpanded ? '▲ Collapse command' : `▼ Show full command (${lines.length} lines)`}
+                            </button>
+                          )}
+
+                          {item.message && item.success && (
+                            <div className="history-item-success-msg">
+                              ✓ {item.message}
+                            </div>
+                          )}
+
                           {item.error && (
                             <div className="history-item-error-msg">
-                              Error: {item.error}
+                              ❌ Error: {item.error}
                             </div>
                           )}
                         </div>

@@ -454,10 +454,13 @@ export function createExecuteRouter(): Router {
       try {
         const appDb = mongoClient.db('manideep_practice_app');
         await appDb.collection('command_histories').insertOne({
-          rollNumber: session.rollNumber,
+          rollNumber: String(session.rollNumber).trim().toUpperCase(),
           command: cmdStr,
           timestamp: new Date(),
-          success: true
+          success: true,
+          executionTime,
+          message,
+          documentCount: documentCount !== undefined ? documentCount : (Array.isArray(result) ? result.length : undefined)
         });
       } catch {
         // Silently ignore history save failures
@@ -479,10 +482,12 @@ export function createExecuteRouter(): Router {
         const mongoClient = await getMongoClient();
         const appDb = mongoClient.db('manideep_practice_app');
         await appDb.collection('command_histories').insertOne({
-          rollNumber: session.rollNumber,
+          rollNumber: String(session.rollNumber).trim().toUpperCase(),
           command: cmdStr,
           timestamp: new Date(),
-          success: false
+          success: false,
+          executionTime,
+          error: error.message || String(error)
         });
       } catch {
         // Silently ignore history save failures

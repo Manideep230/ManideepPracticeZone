@@ -1,3 +1,4 @@
+
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
@@ -101,7 +102,7 @@ const DEFAULT_OPTIONS = {
 
 function parseMongoCommand(command) {
   let cmd = command.trim().replace(/;\s*$/, '');
-  
+
   const match = cmd.match(/^db\.(\w+)\.(\w+)\s*\(([\s\S]*)\)$/);
   if (match) {
     const [, collection, operation, argsStr] = match;
@@ -137,36 +138,36 @@ function parseChain(chainStr) {
 function parseArgs(argsStr) {
   const trimmed = argsStr.trim();
   if (!trimmed) return [];
-  
+
   const args = [];
   let depth = 0;
   let current = '';
   let inString = false;
   let stringChar = '';
-  
+
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i];
     const prev = i > 0 ? trimmed[i - 1] : '';
-    
+
     if (inString) {
       current += ch;
       if (ch === stringChar && prev !== '\\') inString = false;
       continue;
     }
-    
+
     if (ch === '"' || ch === "'") { inString = true; stringChar = ch; current += ch; continue; }
     if (ch === '{' || ch === '[' || ch === '(') { depth++; current += ch; continue; }
     if (ch === '}' || ch === ']' || ch === ')') { depth--; current += ch; continue; }
-    
+
     if (ch === ',' && depth === 0) {
       if (current.trim()) args.push(parseValue(current.trim()));
       current = '';
       continue;
     }
-    
+
     current += ch;
   }
-  
+
   if (current.trim()) args.push(parseValue(current.trim()));
   return args;
 }
@@ -184,7 +185,7 @@ router.get('/options', async (_req, res) => {
     const optionsColl = client.db('manideep_practice_app').collection('options');
     let opt = await optionsColl.findOne({ _id: 'dropdown_options' });
     if (!opt) opt = DEFAULT_OPTIONS;
-    
+
     res.json({
       success: true,
       options: {
@@ -345,7 +346,7 @@ router.get('/auth/me', async (req, res) => {
     const client = await getMongoClient();
     const usersColl = client.db('manideep_practice_app').collection('users');
     const user = await usersColl.findOne({ rollNumber: session.rollNumber });
-    
+
     if (!user) {
       res.status(401).json({ success: false, error: 'User not found' });
       return;
@@ -461,7 +462,7 @@ router.post('/heartbeat/offline', async (req, res) => {
   }
 });
 
-// 6. Admin students with Live Presence Tracking
+// 6. Admin students with Live Presence Tracking & Workout Stats
 router.get('/admin/students', async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
@@ -475,7 +476,30 @@ router.get('/admin/students', async (req, res) => {
   try {
     const client = await getMongoClient();
     const usersColl = client.db('manideep_practice_app').collection('users');
+    const historyColl = client.db('manideep_practice_app').collection('command_histories');
+
     const students = await usersColl.find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray();
+
+    // Aggregate workout statistics per student
+    let workoutStats = [];
+    try {
+      workoutStats = await historyColl.aggregate([
+        {
+          $group: {
+            _id: { $toUpper: '$rollNumber' },
+            totalCommands: { $sum: 1 },
+            successCount: { $sum: { $cond: [{ $eq: ['$success', true] }, 1, 0] } },
+            failCount: { $sum: { $cond: [{ $eq: ['$success', false] }, 1, 0] } },
+            lastWorkout: { $max: '$timestamp' }
+          }
+        }
+      ]).toArray();
+    } catch {}
+
+    const workoutMap = new Map();
+    workoutStats.forEach(w => {
+      if (w._id) workoutMap.set(String(w._id).toUpperCase(), w);
+    });
 
     const nowMs = Date.now();
     const studentsWithPresence = students.map(s => {
@@ -495,11 +519,20 @@ router.get('/admin/students', async (req, res) => {
         }
       }
 
+      const cleanRoll = String(s.rollNumber).trim().toUpperCase();
+      const w = workoutMap.get(cleanRoll) || { totalCommands: 0, successCount: 0, failCount: 0, lastWorkout: null };
+
       return {
         ...s,
         presenceStatus,
         idleMinutes: idleMins,
-        lastActiveTime: s.lastActive || s.lastHeartbeat || s.createdAt
+        lastActiveTime: s.lastActive || s.lastHeartbeat || s.createdAt,
+        workout: {
+          total: w.totalCommands,
+          success: w.successCount,
+          failed: w.failCount,
+          lastWorkoutTime: w.lastWorkout
+        }
       };
     });
 
@@ -509,7 +542,7 @@ router.get('/admin/students', async (req, res) => {
   }
 });
 
-// ADMIN: Get Individual Student Command History
+// ADMIN: Get Individual Student Command History (Case-insensitive)
 router.get('/admin/students/:roll/history', async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
@@ -522,17 +555,53 @@ router.get('/admin/students/:roll/history', async (req, res) => {
 
   try {
     const { roll } = req.params;
+    const cleanRoll = String(roll).trim();
     const client = await getMongoClient();
     const historyColl = client.db('manideep_practice_app').collection('command_histories');
     const history = await historyColl
-      .find({ rollNumber: roll.toUpperCase() })
+      .find({
+        rollNumber: { $regex: new RegExp(`^${cleanRoll}$`, 'i') }
+      })
       .sort({ timestamp: -1 })
-      .limit(300)
+      .limit(500)
       .toArray();
 
-    res.json({ success: true, rollNumber: roll.toUpperCase(), history });
+    res.json({ success: true, rollNumber: cleanRoll.toUpperCase(), history });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch student history: ' + error.message });
+  }
+});
+
+// ADMIN: Live Workout Stream of All Students
+router.get('/admin/workouts', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+  const session = parseToken(token);
+
+  if (!session || !session.isAdmin) {
+    res.status(403).json({ success: false, error: 'Access denied. Admin privileges required.' });
+    return;
+  }
+
+  try {
+    const client = await getMongoClient();
+    const historyColl = client.db('manideep_practice_app').collection('command_histories');
+    const { roll, limit = '150' } = req.query;
+
+    const query = {};
+    if (roll && typeof roll === 'string' && roll.trim() && roll !== 'all') {
+      query.rollNumber = { $regex: new RegExp(`^${roll.trim()}$`, 'i') };
+    }
+
+    const workouts = await historyColl
+      .find(query)
+      .sort({ timestamp: -1 })
+      .limit(Math.min(parseInt(limit, 10) || 150, 500))
+      .toArray();
+
+    res.json({ success: true, workouts });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to fetch workouts: ' + error.message });
   }
 });
 
@@ -955,14 +1024,19 @@ router.post('/execute', async (req, res) => {
       }
     }
 
+    const executionTime = Date.now() - startTime;
+
     // Save execution history to MongoDB permanently
     try {
       const appDb = mongoClient.db('manideep_practice_app');
       await appDb.collection('command_histories').insertOne({
-        rollNumber: session.rollNumber,
+        rollNumber: String(session.rollNumber).trim().toUpperCase(),
         command: cmdStr,
         timestamp: new Date(),
-        success: true
+        success: true,
+        executionTime,
+        message,
+        documentCount: documentCount !== undefined ? documentCount : (Array.isArray(result) ? result.length : undefined)
       });
     } catch {}
 
@@ -971,26 +1045,30 @@ router.post('/execute', async (req, res) => {
       result,
       message,
       documentCount,
-      executionTime: Date.now() - startTime
+      executionTime
     });
 
   } catch (error) {
+    const executionTime = Date.now() - startTime;
+
     // Save failed execution history to MongoDB permanently
     try {
       const mongoClient = await getMongoClient();
       const appDb = mongoClient.db('manideep_practice_app');
       await appDb.collection('command_histories').insertOne({
-        rollNumber: session.rollNumber,
+        rollNumber: String(session.rollNumber).trim().toUpperCase(),
         command: cmdStr,
         timestamp: new Date(),
-        success: false
+        success: false,
+        executionTime,
+        error: error.message || String(error)
       });
     } catch {}
 
     res.json({
       success: false,
       error: error.message || String(error),
-      executionTime: Date.now() - startTime
+      executionTime
     });
   }
 });

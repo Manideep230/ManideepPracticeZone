@@ -2595,4 +2595,412 @@ body {
   background: var(--bg-secondary);
 }
 
+/* ========================================
+   WORKOUT ACTIVITY IN STUDENTS TABLE
+   ======================================== */
+
+.student-workout-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.workout-summary-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.workout-summary-badge.active {
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+}
+
+.workout-summary-badge.empty {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-tertiary);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  font-weight: 500;
+}
+
+.workout-mini-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.mini-success {
+  color: var(--success);
+}
+.mini-fail {
+  color: var(--error);
+}
+.mini-time {
+  color: var(--text-tertiary);
+}
+
+/* ========================================
+   DEDICATED REAL-TIME WORKOUTS FEED TAB
+   ======================================== */
+
+.admin-workouts-feed-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-workouts-toolbar-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.workouts-toolbar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.workouts-toolbar-title h3 {
+  margin: 0 0 4px 0;
+  font-size: 17px;
+}
+.workouts-toolbar-title p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.workouts-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.workouts-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-light);
+}
+
+.workouts-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.workouts-filter-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+
+.admin-select-filter {
+  padding: 6px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+.admin-select-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.workouts-status-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-pill {
+  padding: 5px 11px;
+  border-radius: 14px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.status-pill:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.status-pill.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.status-pill.success.active {
+  background: #10b981;
+  color: #fff;
+  border-color: #10b981;
+}
+
+.status-pill.fail.active {
+  background: #ef4444;
+  color: #fff;
+  border-color: #ef4444;
+}
+
+.workouts-search-box {
+  flex: 1;
+  min-width: 200px;
+}
+.workouts-search-box input {
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.workouts-search-box input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.admin-workouts-stream-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+
+.workouts-feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.workout-feed-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color var(--transition), transform var(--transition);
+}
+.workout-feed-item:hover {
+  border-color: var(--border-hover);
+}
+
+.workout-feed-item.success {
+  border-left: 4px solid var(--success);
+}
+.workout-feed-item.error {
+  border-left: 4px solid var(--error);
+}
+
+.workout-feed-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workout-feed-student {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workout-roll-badge {
+  font-weight: 700;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  background: rgba(56, 189, 248, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.workout-time-ago {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.workout-time-exact {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.workout-feed-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workout-duration {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  background: rgba(56, 189, 248, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.workout-doc-count, .history-item-doc-count {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.workout-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+.workout-status-badge.success {
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--success);
+}
+.workout-status-badge.error {
+  background: rgba(248, 81, 73, 0.14);
+  color: var(--error);
+}
+
+.btn-copy-code {
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.btn-copy-code:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.workout-code-block {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 0;
+  color: #e6edf3;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.btn-expand-code {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.btn-expand-code:hover {
+  text-decoration: underline;
+}
+
+.workout-outcome-msg {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.workout-outcome-msg.success, .history-item-success-msg {
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--success);
+  border-left: 2px solid var(--success);
+}
+.workout-outcome-msg.error {
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--error);
+  border-left: 2px solid var(--error);
+}
+
+/* Modal workout stats summary banner */
+.modal-workout-stats-banner {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.modal-stat-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+}
+.modal-stat-pill.total {
+  border-left: 3px solid var(--accent);
+}
+.modal-stat-pill.success {
+  border-left: 3px solid var(--success);
+}
+.modal-stat-pill.fail {
+  border-left: 3px solid var(--error);
+}
+.modal-stat-pill.rate {
+  border-left: 3px solid #a855f7;
+}
+
+.modal-stat-pill .label {
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.03em;
+}
+.modal-stat-pill .val {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
 
