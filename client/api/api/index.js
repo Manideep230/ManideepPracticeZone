@@ -404,7 +404,65 @@ router.post('/admin/options', async (req, res) => {
   }
 });
 
-// 6. Admin students
+// Presence: Heartbeat endpoint
+router.post('/heartbeat', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+  const session = parseToken(token);
+
+  if (!session) {
+    res.status(401).json({ success: false, error: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const { lastActive, isIdle } = req.body;
+    const client = await getMongoClient();
+    const usersColl = client.db('manideep_practice_app').collection('users');
+
+    const now = new Date();
+    const activeDate = lastActive ? new Date(lastActive) : now;
+
+    await usersColl.updateOne(
+      { rollNumber: session.rollNumber },
+      {
+        $set: {
+          lastHeartbeat: now,
+          lastActive: activeDate,
+          isIdle: !!isIdle,
+          isOnline: true
+        }
+      }
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/heartbeat/offline', async (req, res) => {
+  try {
+    let token = req.body && req.body.token;
+    if (!token && req.headers.authorization) {
+      token = req.headers.authorization.replace('Bearer ', '');
+    }
+    const session = parseToken(token);
+    if (session) {
+      const client = await getMongoClient();
+      const usersColl = client.db('manideep_practice_app').collection('users');
+      await usersColl.updateOne(
+        { rollNumber: session.rollNumber },
+        { $set: { isOnline: false, lastHeartbeat: new Date(0) } }
+      );
+    }
+    res.json({ success: true });
+  } catch {
+    res.json({ success: false });
+  }
+});
+
+// 6. Admin students with Live Presence Tracking
 router.get('/admin/students', async (req, res) => {
   const authHeader = req.headers.authorization;
   const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
@@ -420,9 +478,62 @@ router.get('/admin/students', async (req, res) => {
     const usersColl = client.db('manideep_practice_app').collection('users');
     const students = await usersColl.find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray();
 
-    res.json({ success: true, students });
+    const nowMs = Date.now();
+    const studentsWithPresence = students.map(s => {
+      const lastHbMs = s.lastHeartbeat ? new Date(s.lastHeartbeat).getTime() : 0;
+      const lastActMs = s.lastActive ? new Date(s.lastActive).getTime() : lastHbMs;
+
+      const isHeartbeatActive = (nowMs - lastHbMs) < 65000 && s.isOnline !== false;
+      const idleMs = Math.max(0, nowMs - lastActMs);
+      const idleMins = Math.floor(idleMs / 60000);
+
+      let presenceStatus = 'offline';
+      if (isHeartbeatActive) {
+        if (s.isIdle || idleMs >= 5 * 60 * 1000) {
+          presenceStatus = 'idle';
+        } else {
+          presenceStatus = 'online';
+        }
+      }
+
+      return {
+        ...s,
+        presenceStatus,
+        idleMinutes: idleMins,
+        lastActiveTime: s.lastActive || s.lastHeartbeat || s.createdAt
+      };
+    });
+
+    res.json({ success: true, students: studentsWithPresence });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch students: ' + error.message });
+  }
+});
+
+// ADMIN: Get Individual Student Command History
+router.get('/admin/students/:roll/history', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+  const session = parseToken(token);
+
+  if (!session || !session.isAdmin) {
+    res.status(403).json({ success: false, error: 'Access denied. Admin privileges required.' });
+    return;
+  }
+
+  try {
+    const { roll } = req.params;
+    const client = await getMongoClient();
+    const historyColl = client.db('manideep_practice_app').collection('command_histories');
+    const history = await historyColl
+      .find({ rollNumber: roll.toUpperCase() })
+      .sort({ timestamp: -1 })
+      .limit(300)
+      .toArray();
+
+    res.json({ success: true, rollNumber: roll.toUpperCase(), history });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to fetch student history: ' + error.message });
   }
 });
 

@@ -9,12 +9,16 @@ import { CommandHistory } from './components/CommandHistory';
 import { useTheme } from './hooks/useTheme';
 import { useAuth } from './hooks/useAuth';
 import { useMongoExecution } from './hooks/useMongoExecution';
+import { usePresence } from './hooks/usePresence';
 import { CommandHistoryEntry } from './types';
 
 function App() {
   const { theme, toggleTheme } = useTheme();
   const { user, token, loading: authLoading, authError, options, setAuthError, signUp, signIn, signOut } = useAuth();
   const [viewMode, setViewMode] = useState<'playground' | 'admin'>('playground');
+
+  // Activate presence & activity tracking for logged-in user
+  usePresence(token);
 
   const {
     loading: execLoading,

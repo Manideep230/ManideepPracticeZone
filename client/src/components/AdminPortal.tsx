@@ -19,6 +19,9 @@ interface Student {
   userDbName: string;
   createdAt: string;
   isDisabled?: boolean;
+  presenceStatus?: 'online' | 'idle' | 'offline';
+  idleMinutes?: number;
+  lastActiveTime?: string;
 }
 
 export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
@@ -39,6 +42,12 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
+  // Student History Inspection Modal state
+  const [historyStudent, setHistoryStudent] = useState<Student | null>(null);
+  const [studentHistory, setStudentHistory] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+
   const [adminDbName, setAdminDbName] = useState('user_db_22kt1a4245');
   const [adminCommand, setAdminCommand] = useState('show dbs');
   const [adminExecLoading, setAdminExecLoading] = useState(false);
@@ -54,7 +63,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       .catch(() => {});
   };
 
-  const fetchStudents = () => {
+  const fetchStudents = useCallback(() => {
     fetch(`${API_BASE}/admin/students`, {
       headers: { Authorization: `Bearer ${token}` }
     })
@@ -63,12 +72,41 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
         if (data.success && data.students) setStudents(data.students);
       })
       .catch(() => {});
-  };
+  }, [token]);
 
   useEffect(() => {
     fetchOptions();
     fetchStudents();
-  }, [token]);
+  }, [fetchStudents]);
+
+  // Live real-time presence polling every 12 seconds while in Students tab
+  useEffect(() => {
+    if (activeTab === 'students' && token) {
+      const interval = setInterval(fetchStudents, 12000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, token, fetchStudents]);
+
+  const handleViewStudentHistory = async (student: Student) => {
+    setHistoryStudent(student);
+    setHistoryLoading(true);
+    setHistorySearch('');
+    try {
+      const res = await fetch(`${API_BASE}/admin/students/${student.rollNumber}/history`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.history)) {
+        setStudentHistory(data.history);
+      } else {
+        setStudentHistory([]);
+      }
+    } catch {
+      setStudentHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   const handleToggleStudentStatus = async (student: Student) => {
     setActionLoadingId(student._id);
@@ -352,75 +390,161 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
           </div>
         </div>
       ) : activeTab === 'students' ? (
-        <div className="admin-table-card">
-          <h3>👥 Registered Students & Users</h3>
-          <div className="admin-table-wrapper">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Roll Number</th>
-                  <th>Mobile Number</th>
-                  <th>College Name</th>
-                  <th>Branch</th>
-                  <th>Year</th>
-                  <th>Status</th>
-                  <th>Atlas Database Name</th>
-                  <th>Joined Date</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {students.map(s => (
-                  <tr key={s._id} className={s.isDisabled ? 'row-student-disabled' : ''}>
-                    <td><strong>{s.rollNumber}</strong></td>
-                    <td>{s.mobileNumber}</td>
-                    <td>{s.collegeName || 'N/A'}</td>
-                    <td><span className="badge-branch">{s.branch || 'N/A'}</span></td>
-                    <td>{s.year || 'N/A'}</td>
-                    <td>
-                      <span className={`badge-status ${s.isDisabled ? 'disabled' : 'active'}`}>
-                        {s.isDisabled ? '🚫 Disabled' : '● Active'}
-                      </span>
-                    </td>
-                    <td><code>{s.userDbName}</code></td>
-                    <td>{new Date(s.createdAt).toLocaleDateString()}</td>
-                    <td>
-                      <div className="admin-table-action-group">
-                        <button
-                          type="button"
-                          className={`btn-student-toggle ${s.isDisabled ? 'enable' : 'disable'}`}
-                          onClick={() => handleToggleStudentStatus(s)}
-                          disabled={actionLoadingId === s._id}
-                          title={s.isDisabled ? 'Enable student account' : 'Disable student account'}
-                        >
-                          {s.isDisabled ? '✓ Enable' : '🚫 Disable'}
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-student-delete"
-                          onClick={() => setStudentToDelete(s)}
-                          disabled={actionLoadingId === s._id}
-                          title="Remove student permanently"
-                        >
-                          🗑️ Remove
-                        </button>
-                        <button
-                          type="button"
-                          className="btn-admin-table-action"
-                          onClick={() => {
-                            setAdminDbName(s.userDbName);
-                            setAdminCommand(`// Query database for ${s.rollNumber}:\nshow collections`);
-                            setActiveTab('playground');
-                          }}
-                        >
-                          Inspect DB →
-                        </button>
-                      </div>
-                    </td>
+        <div className="admin-students-section">
+          {/* Real-Time Student Activity Stats Banner */}
+          <div className="admin-presence-stats-grid">
+            <div className="presence-stat-card total">
+              <div className="stat-card-icon">👥</div>
+              <div className="stat-card-info">
+                <span className="stat-card-label">Total Registered</span>
+                <span className="stat-card-value">{students.length}</span>
+              </div>
+            </div>
+
+            <div className="presence-stat-card online">
+              <div className="stat-card-icon">
+                <span className="live-pulse-dot" />
+              </div>
+              <div className="stat-card-info">
+                <span className="stat-card-label">Online (Active)</span>
+                <span className="stat-card-value">{students.filter(s => s.presenceStatus === 'online').length}</span>
+              </div>
+            </div>
+
+            <div className="presence-stat-card idle">
+              <div className="stat-card-icon">⏳</div>
+              <div className="stat-card-info">
+                <span className="stat-card-label">Constant State (&gt;5m)</span>
+                <span className="stat-card-value">{students.filter(s => s.presenceStatus === 'idle').length}</span>
+              </div>
+            </div>
+
+            <div className="presence-stat-card offline">
+              <div className="stat-card-icon">⚪</div>
+              <div className="stat-card-info">
+                <span className="stat-card-label">Offline</span>
+                <span className="stat-card-value">{students.filter(s => s.presenceStatus === 'offline').length}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-table-card">
+            <div className="admin-table-card-header">
+              <h3>👥 Registered Students & Live Activity Monitoring</h3>
+              <div className="admin-table-header-actions">
+                <span className="live-refresh-note">
+                  <span className="live-ping-small" /> Live Monitoring (auto-refresh 12s)
+                </span>
+                <button
+                  type="button"
+                  className="btn-admin-refresh"
+                  onClick={fetchStudents}
+                  title="Refresh Presence Now"
+                >
+                  🔄 Refresh
+                </button>
+              </div>
+            </div>
+
+            <div className="admin-table-wrapper">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Roll Number</th>
+                    <th>Mobile Number</th>
+                    <th>College Name</th>
+                    <th>Branch / Year</th>
+                    <th>Live Presence</th>
+                    <th>Account</th>
+                    <th>Atlas Sandbox DB</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {students.map(s => {
+                    const status = s.presenceStatus || 'offline';
+                    return (
+                      <tr key={s._id} className={`${s.isDisabled ? 'row-student-disabled' : ''} row-presence-${status}`}>
+                        <td><strong>{s.rollNumber}</strong></td>
+                        <td>{s.mobileNumber}</td>
+                        <td>{s.collegeName || 'N/A'}</td>
+                        <td>
+                          <div className="student-branch-year">
+                            <span className="badge-branch">{s.branch || 'N/A'}</span>
+                            <span className="badge-year">{s.year || 'N/A'}</span>
+                          </div>
+                        </td>
+                        <td>
+                          {status === 'online' ? (
+                            <span className="badge-presence online" title="Active now: interacting with mouse/keyboard/queries">
+                              <span className="presence-dot online" />
+                              Active Now
+                            </span>
+                          ) : status === 'idle' ? (
+                            <span className="badge-presence idle" title="Constant state: connected but no mouse movement or queries for 5+ minutes">
+                              <span className="presence-dot idle" />
+                              Constant State ({s.idleMinutes || 5}m idle)
+                            </span>
+                          ) : (
+                            <span className="badge-presence offline" title="Offline: disconnected or tab closed">
+                              <span className="presence-dot offline" />
+                              Offline
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <span className={`badge-status ${s.isDisabled ? 'disabled' : 'active'}`}>
+                            {s.isDisabled ? '🚫 Disabled' : '● Active'}
+                          </span>
+                        </td>
+                        <td><code>{s.userDbName}</code></td>
+                        <td>
+                          <div className="admin-table-action-group">
+                            <button
+                              type="button"
+                              className="btn-student-history"
+                              onClick={() => handleViewStudentHistory(s)}
+                              title={`View ${s.rollNumber}'s complete command execution history`}
+                            >
+                              📜 History
+                            </button>
+                            <button
+                              type="button"
+                              className={`btn-student-toggle ${s.isDisabled ? 'enable' : 'disable'}`}
+                              onClick={() => handleToggleStudentStatus(s)}
+                              disabled={actionLoadingId === s._id}
+                              title={s.isDisabled ? 'Enable student account' : 'Disable student account'}
+                            >
+                              {s.isDisabled ? '✓ Enable' : '🚫 Disable'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-student-delete"
+                              onClick={() => setStudentToDelete(s)}
+                              disabled={actionLoadingId === s._id}
+                              title="Remove student permanently"
+                            >
+                              🗑️ Remove
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-admin-table-action"
+                              onClick={() => {
+                                setAdminDbName(s.userDbName);
+                                setAdminCommand(`// Query database for ${s.rollNumber}:\nshow collections`);
+                                setActiveTab('playground');
+                              }}
+                            >
+                              Inspect DB →
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       ) : (
@@ -547,6 +671,117 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
         onConfirm={handleConfirmExecuteDeleteCmd}
         onCancel={() => setPendingDeleteCmd(null)}
       />
+
+      {/* Student Command History Inspection Modal */}
+      {historyStudent && (
+        <div className="modal-overlay" onClick={() => setHistoryStudent(null)}>
+          <div className="modal-card modal-student-history" onClick={e => e.stopPropagation()}>
+            <div className="modal-history-header">
+              <div className="modal-history-title-group">
+                <h3>📜 Command History: {historyStudent.rollNumber}</h3>
+                <div className="modal-history-student-meta">
+                  <span className="meta-pill">{historyStudent.collegeName || 'N/A'}</span>
+                  <span className="meta-pill">{historyStudent.branch || 'N/A'}</span>
+                  <span className="meta-pill">{historyStudent.year || 'N/A'}</span>
+                  <span className="meta-pill">📱 {historyStudent.mobileNumber}</span>
+                  <code>{historyStudent.userDbName}</code>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setHistoryStudent(null)}
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="modal-history-toolbar">
+              <input
+                type="text"
+                className="modal-history-search"
+                placeholder="Search commands executed by this student..."
+                value={historySearch}
+                onChange={e => setHistorySearch(e.target.value)}
+              />
+              <span className="modal-history-badge">
+                {studentHistory.length} command{studentHistory.length !== 1 ? 's' : ''} executed
+              </span>
+            </div>
+
+            <div className="modal-history-body">
+              {historyLoading ? (
+                <div className="history-modal-loading">
+                  <div className="loading-dots">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <p>Loading command history for {historyStudent.rollNumber}...</p>
+                </div>
+              ) : studentHistory.length === 0 ? (
+                <div className="history-modal-empty">
+                  <p>No commands executed yet by this student.</p>
+                </div>
+              ) : (
+                <div className="modal-history-list">
+                  {studentHistory
+                    .filter(item => !historySearch || item.command.toLowerCase().includes(historySearch.toLowerCase()))
+                    .map((item, idx) => {
+                      const dt = new Date(item.timestamp);
+                      return (
+                        <div key={item._id || idx} className={`modal-history-item ${item.success ? 'success' : 'error'}`}>
+                          <div className="history-item-top">
+                            <span className="history-item-time">
+                              📅 {dt.toLocaleDateString()} at {dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </span>
+                            <div className="history-item-badges">
+                              {item.executionTime !== undefined && (
+                                <span className="history-item-duration">{item.executionTime}ms</span>
+                              )}
+                              <span className={`history-item-status ${item.success ? 'success' : 'error'}`}>
+                                {item.success ? '✓ Succeeded' : '✗ Failed'}
+                              </span>
+                            </div>
+                          </div>
+                          <pre className="history-item-code">{item.command}</pre>
+                          {item.error && (
+                            <div className="history-item-error-msg">
+                              Error: {item.error}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+
+            <div className="modal-history-footer">
+              <button
+                type="button"
+                className="btn-admin-table-action"
+                onClick={() => {
+                  setAdminDbName(historyStudent.userDbName);
+                  setAdminCommand(`// Query database for ${historyStudent.rollNumber}:\nshow collections`);
+                  setHistoryStudent(null);
+                  setActiveTab('playground');
+                }}
+              >
+                Inspect Database in Command Shell →
+              </button>
+              <button
+                type="button"
+                className="btn-modal-cancel"
+                onClick={() => setHistoryStudent(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
