@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { AuthModal } from './components/AuthModal';
 import { AdminPortal } from './components/AdminPortal';
@@ -58,14 +58,20 @@ function App() {
     fetchCollections();
   }, [executeCommand, fetchCollections]);
 
-  const handleRun = useCallback(async () => {
-    const lines = editorValue.split('\n').filter(l => !l.trim().startsWith('//'));
+  const editorValueRef = useRef(editorValue);
+  useEffect(() => {
+    editorValueRef.current = editorValue;
+  }, [editorValue]);
+
+  const handleRun = useCallback(async (codeOverride?: string) => {
+    const rawCode = typeof codeOverride === 'string' ? codeOverride : editorValueRef.current;
+    const lines = rawCode.split('\n').filter(l => !l.trim().startsWith('//'));
     const command = lines.join('\n').trim();
     if (!command) return;
 
     // Delete/drop commands execute immediately without popup confirmation
     await runCommandNow(command);
-  }, [editorValue, runCommandNow]);
+  }, [runCommandNow]);
 
   const handleClear = useCallback(() => {
     setEditorValue('');

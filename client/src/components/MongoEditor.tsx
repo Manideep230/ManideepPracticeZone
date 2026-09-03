@@ -1,10 +1,10 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 
 interface MongoEditorProps {
   value: string;
   onChange: (value: string) => void;
-  onRun: () => void;
+  onRun: (code?: string) => void;
   onClear: () => void;
   theme: 'dark' | 'light';
   loading: boolean;
@@ -13,6 +13,35 @@ interface MongoEditorProps {
 export function MongoEditor({ value, onChange, onRun, onClear, theme, loading }: MongoEditorProps) {
   const editorRef = useRef<any>(null);
   const [copied, setCopied] = useState(false);
+  const onRunRef = useRef(onRun);
+
+  useEffect(() => {
+    onRunRef.current = onRun;
+  });
+
+  const triggerRun = useCallback(() => {
+    const currentCode = editorRef.current ? editorRef.current.getValue() : value;
+    onRunRef.current(currentCode);
+  }, [value]);
+
+  const triggerRunRef = useRef(triggerRun);
+  useEffect(() => {
+    triggerRunRef.current = triggerRun;
+  });
+
+  // Global Ctrl+Enter / Cmd+Enter keydown listener so it always works anywhere
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'Enter' || e.keyCode === 13)) {
+        e.preventDefault();
+        e.stopPropagation();
+        triggerRunRef.current();
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown, true);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, true);
+  }, []);
 
   const handleEditorMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
@@ -80,13 +109,20 @@ export function MongoEditor({ value, onChange, onRun, onClear, theme, loading }:
 
     monaco.editor.setTheme(theme === 'dark' ? 'mongo-dark' : 'mongo-light');
 
-    // Add Ctrl+Enter keybinding
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      onRun();
+    // Add Ctrl+Enter action in Monaco editor
+    editor.addAction({
+      id: 'run-mongo-command',
+      label: 'Run MongoDB Query',
+      keybindings: [
+        monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+      ],
+      run: () => {
+        triggerRunRef.current();
+      },
     });
 
     editor.focus();
-  }, [theme, onRun]);
+  }, [theme]);
 
   const handleCopy = () => {
     if (!value) return;
@@ -177,7 +213,7 @@ export function MongoEditor({ value, onChange, onRun, onClear, theme, loading }:
 
           <button
             className="btn-run"
-            onClick={onRun}
+            onClick={triggerRun}
             disabled={loading}
             title="Execute on Atlas (Ctrl+Enter)"
             id="run-query"
