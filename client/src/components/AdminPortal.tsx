@@ -109,6 +109,17 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [adminExecResult, setAdminExecResult] = useState<ExecutionResult | null>(null);
   const [pendingDeleteCmd, setPendingDeleteCmd] = useState<string | null>(null);
 
+  // Custom Performance Report Modal State (Date, Time-to-Time, Hourly Breakdown)
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportDate, setReportDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [reportIsAllDay, setReportIsAllDay] = useState(true);
+  const [reportFromTime, setReportFromTime] = useState('09:00');
+  const [reportToTime, setReportToTime] = useState('18:00');
+  const [reportScope, setReportScope] = useState<'date' | 'all'>('date');
+  const [reportBranch, setReportBranch] = useState('all');
+  const [reportIncludeHourly, setReportIncludeHourly] = useState(true);
+  const [reportGenerating, setReportGenerating] = useState(false);
+
   // Auto-dismiss status alerts after 4.5s for a clean, non-intrusive UI
   useEffect(() => {
     if (statusMsg) {
@@ -121,6 +132,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        if (showReportModal) setShowReportModal(false);
         if (historyStudent) setHistoryStudent(null);
         if (deleteTarget) setDeleteTarget(null);
         if (studentToDelete) setStudentToDelete(null);
@@ -128,7 +140,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [historyStudent, deleteTarget, studentToDelete]);
+  }, [showReportModal, historyStudent, deleteTarget, studentToDelete]);
 
   const fetchOptions = () => {
     fetch(`${API_BASE}/options`)
@@ -196,6 +208,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   // Instant zero-latency memoized student filter
   const filteredStudents = useMemo(() => {
     return students.filter(s => {
+      if (s.rollNumber === '22KT1A4245') return false;
       if (studentPresenceFilter === 'online' && s.presenceStatus !== 'online') return false;
       if (studentPresenceFilter === 'idle' && s.presenceStatus !== 'idle') return false;
       if (studentPresenceFilter === 'offline' && s.presenceStatus !== 'offline') return false;
@@ -334,102 +347,286 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
     }
   };
 
-  // Export student performance to Excel (.xlsx) with branch-wise sheets in ascending order of roll numbers
-  const handleExportBranchWiseExcel = () => {
-    if (!students || students.length === 0) {
-      setStatusMsg({ type: 'error', text: 'No student records available to export.' });
-      return;
-    }
+  // Open custom performance report modal (Date, Time-to-Time, Hourly Breakdown)
+  const handleOpenReportModal = () => {
+    setShowReportModal(true);
+  };
 
+  // Generate and download student performance report with date range, time-to-time, and hourly performance
+  const handleGenerateCustomReport = async () => {
+    setReportGenerating(true);
     try {
+      const fromTime = reportIsAllDay ? '00:00' : reportFromTime;
+      const toTime = reportIsAllDay ? '23:59' : reportToTime;
+      const isAllDates = reportScope === 'all';
+
+      const res = await fetch(`${API_BASE}/admin/reports/hourly`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          date: reportDate,
+          fromTime,
+          toTime,
+          isAllDates
+        })
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        setStatusMsg({ type: 'error', text: data.error || 'Failed to fetch report data.' });
+        setReportGenerating(false);
+        return;
+      }
+
+      // Strictly exclude admin account from students list
+      const studentsList: Student[] = (data.students || []).filter(
+        (s: Student) => s.rollNumber !== '22KT1A4245' && s.collegeName !== 'Admin Portal'
+      );
+
+      // Strictly exclude admin account from workouts
+      const workoutsList: any[] = (data.workouts || []).filter(
+        (w: any) => String(w.rollNumber).trim().toUpperCase() !== '22KT1A4245'
+      );
+
+      // Aggregate workouts per student and per hour in local browser time
+      const studentMetrics: Record<string, {
+        total: number;
+        success: number;
+        failed: number;
+        hourly: Record<number, number>;
+        lastWorkout: Date | null;
+      }> = {};
+
+      workoutsList.forEach((w: any) => {
+        const roll = String(w.rollNumber || '').trim().toUpperCase();
+        if (!roll || roll === '22KT1A4245') return;
+
+        if (!studentMetrics[roll]) {
+          studentMetrics[roll] = {
+            total: 0,
+            success: 0,
+            failed: 0,
+            hourly: {},
+            lastWorkout: null
+          };
+        }
+
+        studentMetrics[roll].total++;
+        if (w.success) studentMetrics[roll].success++;
+        else studentMetrics[roll].failed++;
+
+        const d = new Date(w.timestamp);
+        if (!isNaN(d.getTime())) {
+          const hr = d.getHours();
+          studentMetrics[roll].hourly[hr] = (studentMetrics[roll].hourly[hr] || 0) + 1;
+          if (!studentMetrics[roll].lastWorkout || d > studentMetrics[roll].lastWorkout!) {
+            studentMetrics[roll].lastWorkout = d;
+          }
+        }
+      });
+
+      // Determine active hourly columns to display
+      let hoursToShow: number[] = [];
+      if (!reportIsAllDay) {
+        const startHr = parseInt(reportFromTime.split(':')[0], 10) || 0;
+        const endHr = parseInt(reportToTime.split(':')[0], 10) || 23;
+        for (let h = startHr; h <= endHr; h++) {
+          hoursToShow.push(h);
+        }
+      } else {
+        const activeSet = new Set<number>();
+        workoutsList.forEach((w: any) => {
+          const d = new Date(w.timestamp);
+          if (!isNaN(d.getTime())) activeSet.add(d.getHours());
+        });
+        hoursToShow = Array.from(activeSet).sort((a, b) => a - b);
+        if (hoursToShow.length === 0) {
+          hoursToShow = [9, 10, 11, 12, 13, 14, 15, 16, 17];
+        }
+      }
+
+      const formatHourLabel = (hr: number) => {
+        const pad = (n: number) => (n < 10 ? '0' + n : String(n));
+        const next = (hr + 1) % 24;
+        return `${pad(hr)}:00 - ${pad(next)}:00`;
+      };
+
       const naturalRollSort = (a: Student, b: Student) => {
         return (a.rollNumber || '').localeCompare(b.rollNumber || '', undefined, { numeric: true, sensitivity: 'base' });
       };
 
       const formatStudentRow = (s: Student, idx: number) => {
-        const total = s.workout?.total || 0;
-        const success = s.workout?.success || 0;
-        const failed = s.workout?.failed || 0;
-        const successRate = total > 0 ? `${((success / total) * 100).toFixed(1)}%` : '0%';
-        let lastWorkoutStr = 'No queries run';
-        if (s.workout?.lastWorkoutTime) {
+        const m = studentMetrics[s.rollNumber.toUpperCase()] || {
+          total: 0,
+          success: 0,
+          failed: 0,
+          hourly: {},
+          lastWorkout: null
+        };
+        const successRate = m.total > 0 ? `${((m.success / m.total) * 100).toFixed(1)}%` : '0%';
+        let lastWorkoutStr = 'None';
+        if (m.lastWorkout) {
+          lastWorkoutStr = m.lastWorkout.toLocaleString();
+        } else if (s.workout?.lastWorkoutTime) {
           const d = new Date(s.workout.lastWorkoutTime);
           lastWorkoutStr = isNaN(d.getTime()) ? String(s.workout.lastWorkoutTime) : d.toLocaleString();
         }
 
-        return {
+        const row: Record<string, any> = {
           'S.No': idx + 1,
           'Roll Number': s.rollNumber,
           'Mobile Number': s.mobileNumber,
           'College Name': s.collegeName || 'GMRIT College, Vizianagaram',
           'Branch': s.branch || 'General',
-          'Year': s.year || 'N/A',
-          'Total Commands': total,
-          'Successful Queries': success,
-          'Error Queries': failed,
-          'Success Rate': successRate,
-          'Last Activity / Workout': lastWorkoutStr,
-          'Live Presence': s.presenceStatus === 'online' ? 'Active Now' : s.presenceStatus === 'idle' ? `Constant State (${s.idleMinutes || 5}m idle)` : 'Offline',
-          'Account Status': s.isDisabled ? 'Disabled' : 'Active'
+          'Academic Year': s.year || 'N/A',
+          'Period Queries': m.total,
+          'Successful': m.success,
+          'Errors': m.failed,
+          'Success Rate (%)': successRate
         };
+
+        if (reportIncludeHourly) {
+          hoursToShow.forEach(h => {
+            row[formatHourLabel(h)] = m.hourly[h] || 0;
+          });
+        }
+
+        row['Last Activity Time'] = lastWorkoutStr;
+        row['Live Presence'] = s.presenceStatus === 'online' ? 'Online' : s.presenceStatus === 'idle' ? 'Idle' : 'Offline';
+        row['Account Status'] = s.isDisabled ? 'Disabled' : 'Active';
+
+        return row;
       };
 
       const colsWidth = [
         { wch: 6 },   // S.No
         { wch: 18 },  // Roll Number
-        { wch: 15 },  // Mobile Number
-        { wch: 32 },  // College Name
+        { wch: 15 },  // Mobile
+        { wch: 32 },  // College
         { wch: 12 },  // Branch
         { wch: 12 },  // Year
-        { wch: 16 },  // Total Commands
-        { wch: 18 },  // Successful Queries
-        { wch: 16 },  // Error Queries
-        { wch: 15 },  // Success Rate
-        { wch: 24 },  // Last Activity
-        { wch: 20 },  // Live Presence
-        { wch: 15 }   // Account Status
+        { wch: 16 },  // Period Queries
+        { wch: 14 },  // Successful
+        { wch: 14 },  // Errors
+        { wch: 16 }   // Success Rate
       ];
+
+      if (reportIncludeHourly) {
+        hoursToShow.forEach(() => colsWidth.push({ wch: 16 }));
+      }
+      colsWidth.push({ wch: 22 }, { wch: 16 }, { wch: 14 });
 
       const wb = XLSX.utils.book_new();
 
-      // Master sheet: All students sorted in ascending order of roll numbers
-      const allSorted = [...students].sort(naturalRollSort);
-      const allWs = XLSX.utils.json_to_sheet(allSorted.map(formatStudentRow));
+      const effectiveStudents = reportBranch === 'all'
+        ? studentsList
+        : studentsList.filter(s => (s.branch || 'General').trim() === reportBranch);
+
+      const sortedAll = [...effectiveStudents].sort(naturalRollSort);
+      const allWs = XLSX.utils.json_to_sheet(sortedAll.map(formatStudentRow));
       allWs['!cols'] = colsWidth;
-      XLSX.utils.book_append_sheet(wb, allWs, 'All Students');
 
-      // Individual Branch sheets (CSE, ECE, EEE, MECH, etc.), each in ascending order of roll numbers
-      const branches = Array.from(new Set(students.map(s => (s.branch || 'General').trim()))).sort();
-      branches.forEach(branch => {
-        const branchStudents = students
-          .filter(s => (s.branch || 'General').trim() === branch)
-          .sort(naturalRollSort);
+      const mainSheetTitle = reportBranch === 'all' ? 'All Students' : `${reportBranch} Students`;
+      XLSX.utils.book_append_sheet(wb, allWs, mainSheetTitle);
 
-        if (branchStudents.length > 0) {
-          const ws = XLSX.utils.json_to_sheet(branchStudents.map(formatStudentRow));
-          ws['!cols'] = colsWidth;
-          const cleanSheetName = branch.replace(/[:\\/?*\[\]]/g, '_').substring(0, 31);
-          XLSX.utils.book_append_sheet(wb, ws, cleanSheetName);
-        }
+      // If "All Branches", create separate branch sheets (CSE, ECE, etc.) in ascending roll order
+      if (reportBranch === 'all') {
+        const branches = Array.from(new Set(studentsList.map(s => (s.branch || 'General').trim()))).sort();
+        branches.forEach(branch => {
+          const branchStudents = studentsList
+            .filter(s => (s.branch || 'General').trim() === branch)
+            .sort(naturalRollSort);
+
+          if (branchStudents.length > 0) {
+            const ws = XLSX.utils.json_to_sheet(branchStudents.map(formatStudentRow));
+            ws['!cols'] = colsWidth;
+            const cleanSheetName = branch.replace(/[:\\/?*\[\]]/g, '_').substring(0, 31);
+            XLSX.utils.book_append_sheet(wb, ws, cleanSheetName);
+          }
+        });
+      }
+
+      // Sheet: Hourly Timeline Summary
+      if (reportIncludeHourly && hoursToShow.length > 0) {
+        const summaryRows = hoursToShow.map((h, i) => {
+          let hTotal = 0;
+          let hSuccess = 0;
+          let hFail = 0;
+          let activeStudentCount = 0;
+
+          effectiveStudents.forEach(s => {
+            const m = studentMetrics[s.rollNumber.toUpperCase()];
+            const count = m?.hourly?.[h] || 0;
+            if (count > 0) {
+              activeStudentCount++;
+              hTotal += count;
+            }
+          });
+
+          workoutsList.forEach((w: any) => {
+            const d = new Date(w.timestamp);
+            if (!isNaN(d.getTime()) && d.getHours() === h) {
+              if (w.success) hSuccess++;
+              else hFail++;
+            }
+          });
+
+          const rate = hTotal > 0 ? `${((hSuccess / hTotal) * 100).toFixed(1)}%` : '0%';
+
+          return {
+            'S.No': i + 1,
+            'Hour Slot': formatHourLabel(h),
+            'Total Queries': hTotal,
+            'Active Students': activeStudentCount,
+            'Successful Queries': hSuccess,
+            'Error Queries': hFail,
+            'Success Rate (%)': rate
+          };
+        });
+
+        const summaryWs = XLSX.utils.json_to_sheet(summaryRows);
+        summaryWs['!cols'] = [
+          { wch: 6 },
+          { wch: 18 },
+          { wch: 16 },
+          { wch: 18 },
+          { wch: 18 },
+          { wch: 16 },
+          { wch: 16 }
+        ];
+        XLSX.utils.book_append_sheet(wb, summaryWs, 'Hourly Timeline');
+      }
+
+      const datePart = isAllDates ? 'AllDates' : reportDate;
+      const timePart = reportIsAllDay ? 'FullDay' : `${reportFromTime.replace(':', '')}-${reportToTime.replace(':', '')}`;
+      const fileName = `Student_Performance_${datePart}_${timePart}.xlsx`;
+
+      XLSX.writeFile(wb, fileName);
+      setShowReportModal(false);
+      setStatusMsg({
+        type: 'success',
+        text: `Report downloaded: ${fileName} (${workoutsList.length} queries across ${sortedAll.length} students)`
       });
-
-      const today = new Date().toISOString().split('T')[0];
-      XLSX.writeFile(wb, `Student_Performance_Report_${today}.xlsx`);
-      setStatusMsg({ type: 'success', text: `Downloaded Excel report with ${branches.length + 1} branch sheets!` });
     } catch (err: any) {
-      setStatusMsg({ type: 'error', text: 'Failed to generate Excel report: ' + (err.message || String(err)) });
+      setStatusMsg({ type: 'error', text: 'Failed to generate report: ' + (err.message || String(err)) });
+    } finally {
+      setReportGenerating(false);
     }
   };
 
-  // Export all student workout queries to Excel (.xlsx)
+  // Export all student workout queries to Excel (.xlsx) excluding admin
   const handleExportWorkoutsExcel = () => {
-    if (!allWorkouts || allWorkouts.length === 0) {
-      setStatusMsg({ type: 'error', text: 'No workout queries available to export.' });
+    const nonAdminWorkouts = allWorkouts.filter(w => String(w.rollNumber).trim().toUpperCase() !== '22KT1A4245');
+    if (!nonAdminWorkouts || nonAdminWorkouts.length === 0) {
+      setStatusMsg({ type: 'error', text: 'No student workout queries available to export.' });
       return;
     }
 
     try {
-      const rows = allWorkouts.map((w, idx) => {
+      const rows = nonAdminWorkouts.map((w, idx) => {
         const d = new Date(w.timestamp);
         return {
           'S.No': idx + 1,
@@ -453,11 +650,11 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
         { wch: 35 },
         { wch: 22 }
       ];
-      XLSX.utils.book_append_sheet(wb, ws, 'All Queries');
+      XLSX.utils.book_append_sheet(wb, ws, 'Student Queries');
 
       const today = new Date().toISOString().split('T')[0];
-      XLSX.writeFile(wb, `Student_Workouts_All_${today}.xlsx`);
-      setStatusMsg({ type: 'success', text: `Exported ${allWorkouts.length} workout queries to Excel!` });
+      XLSX.writeFile(wb, `Student_Queries_${today}.xlsx`);
+      setStatusMsg({ type: 'success', text: `Exported ${nonAdminWorkouts.length} student queries to Excel!` });
     } catch (err: any) {
       setStatusMsg({ type: 'error', text: 'Failed to export queries: ' + (err.message || String(err)) });
     }
@@ -809,10 +1006,10 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                 <button
                   type="button"
                   className="btn-admin-export"
-                  onClick={handleExportBranchWiseExcel}
-                  title="Download branch-wise Excel (.xlsx) with roll numbers sorted in ascending order"
+                  onClick={handleOpenReportModal}
+                  title="Generate custom student performance report with date range, time-to-time window, and hourly performance breakdown"
                 >
-                  📊 Export Branch-Wise Excel
+                  📊 Generate Performance Report
                 </button>
 
                 <button
@@ -1486,6 +1683,185 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                 onClick={() => setHistoryStudent(null)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive Custom Student Performance Report Modal */}
+      {showReportModal && (
+        <div className="modal-overlay" onClick={() => !reportGenerating && setShowReportModal(false)}>
+          <div className="modal-card modal-report-config" onClick={e => e.stopPropagation()}>
+            <div className="report-modal-header">
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  📊 Student Performance Report Generator
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  Configure date, time-to-time window, and hourly performance breakdown for student-wise Excel report
+                </p>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => !reportGenerating && setShowReportModal(false)}
+                disabled={reportGenerating}
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="report-modal-body">
+              {/* Scope Selection */}
+              <div className="report-form-group">
+                <label>Report Time Scope</label>
+                <div className="report-scope-toggle">
+                  <button
+                    type="button"
+                    className={`report-scope-btn ${reportScope === 'date' ? 'active' : ''}`}
+                    onClick={() => setReportScope('date')}
+                  >
+                    📅 Specific Date & Time Window
+                  </button>
+                  <button
+                    type="button"
+                    className={`report-scope-btn ${reportScope === 'all' ? 'active' : ''}`}
+                    onClick={() => setReportScope('all')}
+                  >
+                    🌐 All Dates (Lifetime Performance)
+                  </button>
+                </div>
+              </div>
+
+              {reportScope === 'date' && (
+                <>
+                  {/* Date Selector */}
+                  <div className="report-form-group">
+                    <label>
+                      <span>Select Date:</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>YYYY-MM-DD</span>
+                    </label>
+                    <div className="report-date-row">
+                      <input
+                        type="date"
+                        value={reportDate}
+                        onChange={e => setReportDate(e.target.value)}
+                        max={new Date().toISOString().split('T')[0]}
+                      />
+                      <button
+                        type="button"
+                        className="report-quick-btn"
+                        onClick={() => setReportDate(new Date().toISOString().split('T')[0])}
+                      >
+                        Today
+                      </button>
+                      <button
+                        type="button"
+                        className="report-quick-btn"
+                        onClick={() => {
+                          const d = new Date();
+                          d.setDate(d.getDate() - 1);
+                          setReportDate(d.toISOString().split('T')[0]);
+                        }}
+                      >
+                        Yesterday
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Time Window (From Time to To Time) */}
+                  <div className="report-form-group">
+                    <label>Time-to-Time Range</label>
+                    <label className="report-checkbox-label">
+                      <input
+                        type="checkbox"
+                        checked={reportIsAllDay}
+                        onChange={e => setReportIsAllDay(e.target.checked)}
+                      />
+                      <span>Entire Day (00:00 to 23:59)</span>
+                    </label>
+
+                    {!reportIsAllDay && (
+                      <div className="report-time-row">
+                        <div className="report-time-input-wrap">
+                          <span>From Time (Start):</span>
+                          <input
+                            type="time"
+                            value={reportFromTime}
+                            onChange={e => setReportFromTime(e.target.value)}
+                          />
+                        </div>
+                        <div style={{ color: 'var(--text-tertiary)', fontWeight: 'bold', paddingTop: '18px' }}>→</div>
+                        <div className="report-time-input-wrap">
+                          <span>To Time (End):</span>
+                          <input
+                            type="time"
+                            value={reportToTime}
+                            onChange={e => setReportToTime(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Department / Branch Selection */}
+              <div className="report-form-group">
+                <label>Department / Branch Organization</label>
+                <select
+                  value={reportBranch}
+                  onChange={e => setReportBranch(e.target.value)}
+                  className="admin-select-filter"
+                  style={{ width: '100%', padding: '8px 12px' }}
+                >
+                  <option value="all">📁 All Branches (Dedicated Sheet Tab per Branch + Master Sheet)</option>
+                  {options.branches.map(b => (
+                    <option key={b} value={b}>
+                      📂 Only {b} Branch
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Additional Options */}
+              <div className="report-form-group">
+                <label>Report Structure & Breakdown</label>
+                <label className="report-checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={reportIncludeHourly}
+                    onChange={e => setReportIncludeHourly(e.target.checked)}
+                  />
+                  <span>Include Hourly Performance breakdown columns (Hour-by-Hour query count)</span>
+                </label>
+              </div>
+
+              {/* Security & Filter Info Banner */}
+              <div className="report-info-banner">
+                <div>🛡️ <strong>Admin Account Filtered:</strong> Admin details (22KT1A4245) are completely excluded from student metrics.</div>
+                <div>🔢 <strong>Ascending Order:</strong> All students will be sorted in ascending order of roll numbers within each branch.</div>
+              </div>
+            </div>
+
+            <div className="report-modal-footer">
+              <button
+                type="button"
+                className="btn-report-cancel"
+                onClick={() => setShowReportModal(false)}
+                disabled={reportGenerating}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-report-submit"
+                onClick={handleGenerateCustomReport}
+                disabled={reportGenerating}
+              >
+                {reportGenerating ? '⏳ Generating Excel...' : '📥 Download Excel Sheet (.xlsx)'}
               </button>
             </div>
           </div>

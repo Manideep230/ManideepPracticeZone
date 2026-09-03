@@ -729,7 +729,7 @@ router.get('/admin/students', async (req, res) => {
     const currentColleges = (optDoc?.colleges && optDoc.colleges.length > 0) ? optDoc.colleges : DEFAULT_OPTIONS.colleges;
     const singleCollege = currentColleges.length === 1 ? currentColleges[0] : null;
 
-    const students = await usersColl.find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray();
+    const students = await usersColl.find({ isAdmin: { $ne: true }, rollNumber: { $ne: '22KT1A4245' } }, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray();
 
     // Aggregate workout statistics per student
     let workoutStats = [];
@@ -863,6 +863,77 @@ router.get('/admin/workouts', async (req, res) => {
     res.json({ success: true, workouts, total: workouts.length });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Failed to fetch workouts: ' + error.message });
+  }
+});
+
+// ADMIN: Fetch hourly report workouts and students for custom date and time-to-time range
+router.post('/admin/reports/hourly', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+  const session = parseToken(token);
+
+  if (!session || !session.isAdmin) {
+    res.status(403).json({ success: false, error: 'Access denied. Admin privileges required.' });
+    return;
+  }
+
+  try {
+    const { date, fromTime = '00:00', toTime = '23:59', isAllDates = false } = req.body;
+    const client = await getMongoClient();
+    const db = client.db('manideep_practice_app');
+    const usersColl = db.collection('users');
+    const historyColl = db.collection('command_histories');
+    const optionsColl = db.collection('options');
+
+    const optDoc = await optionsColl.findOne({ _id: 'dropdown_options' });
+    const currentColleges = (optDoc?.colleges && optDoc.colleges.length > 0) ? optDoc.colleges : DEFAULT_OPTIONS.colleges;
+    const singleCollege = currentColleges.length === 1 ? currentColleges[0] : null;
+
+    // Exclude admin from students list
+    const students = await usersColl
+      .find({ isAdmin: { $ne: true }, rollNumber: { $ne: '22KT1A4245' } }, { projection: { password: 0 } })
+      .toArray();
+
+    if (singleCollege) {
+      students.forEach(s => {
+        if (!s.collegeName || s.collegeName === 'PBR VITS' || !currentColleges.includes(s.collegeName)) {
+          s.collegeName = singleCollege;
+        }
+      });
+    }
+
+    // Query workouts strictly excluding admin
+    const query = {
+      rollNumber: { $ne: '22KT1A4245' }
+    };
+
+    if (!isAllDates && date) {
+      const startIso = new Date(`${date}T${fromTime}:00.000Z`);
+      const endIso = new Date(`${date}T${toTime}:59.999Z`);
+      const startLocal = new Date(`${date}T${fromTime}:00`);
+      const endLocal = new Date(`${date}T${toTime}:59.999`);
+
+      query.$or = [
+        { timestamp: { $gte: startIso, $lte: endIso } },
+        { timestamp: { $gte: startLocal, $lte: endLocal } }
+      ];
+    }
+
+    const workouts = await historyColl
+      .find(query, { projection: { rollNumber: 1, timestamp: 1, success: 1, executionTime: 1, command: 1 } })
+      .sort({ timestamp: -1 })
+      .toArray();
+
+    res.json({
+      success: true,
+      students,
+      workouts,
+      total: workouts.length,
+      date: isAllDates ? 'All Dates' : date,
+      timeWindow: `${fromTime} - ${toTime}`
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Failed to fetch report data: ' + error.message });
   }
 });
 
