@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Header } from './components/Header';
 import { AuthModal } from './components/AuthModal';
 import { AdminPortal } from './components/AdminPortal';
@@ -6,7 +6,6 @@ import { MongoEditor } from './components/MongoEditor';
 import { OutputPanel } from './components/OutputPanel';
 import { DatabaseExplorer } from './components/DatabaseExplorer';
 import { CommandHistory } from './components/CommandHistory';
-import { ConfirmModal } from './components/ConfirmModal';
 import { useTheme } from './hooks/useTheme';
 import { useAuth } from './hooks/useAuth';
 import { useMongoExecution } from './hooks/useMongoExecution';
@@ -24,24 +23,37 @@ function App() {
     dbName,
     executeCommand,
     fetchCollections,
+    fetchHistory,
     fetchCollectionDocs,
   } = useMongoExecution(token);
 
   const [editorValue, setEditorValue] = useState('db.createCollection("users")');
   const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([]);
 
-  // Destructive command execution confirm modal state
-  const [pendingDeleteCommand, setPendingDeleteCommand] = useState<string | null>(null);
+  // Fetch permanent command history on sign-in
+  useEffect(() => {
+    if (token) {
+      fetchHistory().then(hist => {
+        if (hist && hist.length > 0) {
+          setCommandHistory(hist);
+        }
+      });
+    } else {
+      setCommandHistory([]);
+    }
+  }, [token, fetchHistory]);
 
   const runCommandNow = useCallback(async (command: string) => {
     const res = await executeCommand(command);
 
-    setCommandHistory(prev => [...prev, {
+    const newEntry: CommandHistoryEntry = {
       id: Date.now().toString(),
       command,
       timestamp: new Date(),
       success: res.success,
-    }]);
+    };
+
+    setCommandHistory(prev => [newEntry, ...prev]);
 
     fetchCollections();
   }, [executeCommand, fetchCollections]);
@@ -51,28 +63,9 @@ function App() {
     const command = lines.join('\n').trim();
     if (!command) return;
 
-    const lowerCmd = command.toLowerCase();
-
-    // If command contains destructive operations (delete or drop), ask for popup confirmation
-    if (
-      lowerCmd.includes('delete') ||
-      lowerCmd.includes('drop') ||
-      lowerCmd.includes('dropdatabase')
-    ) {
-      setPendingDeleteCommand(command);
-      return;
-    }
-
+    // Delete/drop commands execute immediately without popup confirmation
     await runCommandNow(command);
   }, [editorValue, runCommandNow]);
-
-  const handleConfirmExecuteDelete = useCallback(async () => {
-    if (pendingDeleteCommand) {
-      const cmd = pendingDeleteCommand;
-      setPendingDeleteCommand(null);
-      await runCommandNow(cmd);
-    }
-  }, [pendingDeleteCommand, runCommandNow]);
 
   const handleClear = useCallback(() => {
     setEditorValue('');
@@ -157,18 +150,6 @@ function App() {
           </div>
         </div>
       )}
-
-      {/* Destructive Command Delete / Drop Confirmation Modal */}
-      <ConfirmModal
-        isOpen={!!pendingDeleteCommand}
-        title="Confirm Destructive Action"
-        message={`Your command contains a delete/drop operation ("${pendingDeleteCommand}"). Are you sure you want to execute this on MongoDB Atlas?`}
-        confirmText="Proceed & Execute"
-        cancelText="Cancel"
-        isDanger={true}
-        onConfirm={handleConfirmExecuteDelete}
-        onCancel={() => setPendingDeleteCommand(null)}
-      />
     </div>
   );
 }

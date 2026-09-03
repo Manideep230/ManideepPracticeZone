@@ -450,6 +450,19 @@ export function createExecuteRouter(): Router {
 
       const executionTime = Date.now() - startTime;
 
+      // Save execution history to MongoDB permanently
+      try {
+        const appDb = mongoClient.db('manideep_practice_app');
+        await appDb.collection('command_histories').insertOne({
+          rollNumber: session.rollNumber,
+          command: cmdStr,
+          timestamp: new Date(),
+          success: true
+        });
+      } catch {
+        // Silently ignore history save failures
+      }
+
       res.json({
         success: true,
         result,
@@ -460,11 +473,58 @@ export function createExecuteRouter(): Router {
 
     } catch (error: any) {
       const executionTime = Date.now() - startTime;
+
+      // Save failed execution history to MongoDB permanently
+      try {
+        const mongoClient = await getMongoClient();
+        const appDb = mongoClient.db('manideep_practice_app');
+        await appDb.collection('command_histories').insertOne({
+          rollNumber: session.rollNumber,
+          command: cmdStr,
+          timestamp: new Date(),
+          success: false
+        });
+      } catch {
+        // Silently ignore history save failures
+      }
+
       res.json({
         success: false,
         error: error.message || String(error),
         executionTime
       });
+    }
+  });
+
+  router.get('/history', async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+    const session = parseToken(token);
+
+    if (!session) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    try {
+      const mongoClient = await getMongoClient();
+      const appDb = mongoClient.db('manideep_practice_app');
+      const histories = await appDb.collection('command_histories')
+        .find({ rollNumber: session.rollNumber })
+        .sort({ timestamp: -1 })
+        .limit(1000)
+        .toArray();
+
+      const formatted = histories.map(h => ({
+        id: h._id.toString(),
+        command: h.command,
+        timestamp: h.timestamp,
+        success: !!h.success
+      }));
+
+      res.json({ success: true, history: formatted });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message || 'Failed to fetch history' });
     }
   });
 

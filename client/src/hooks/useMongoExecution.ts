@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { ExecutionResult, CollectionInfo } from '../types';
+import { ExecutionResult, CollectionInfo, CommandHistoryEntry } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 
@@ -62,6 +62,27 @@ export function useMongoExecution(token: string | null) {
     }
   }, [token]);
 
+  const fetchHistory = useCallback(async (): Promise<CommandHistoryEntry[]> => {
+    if (!token) return [];
+    try {
+      const response = await fetch(`${API_BASE}/history`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await response.json();
+      if (data.success && Array.isArray(data.history)) {
+        return data.history.map((item: any) => ({
+          id: item.id || String(Math.random()),
+          command: item.command,
+          timestamp: new Date(item.timestamp),
+          success: !!item.success,
+        }));
+      }
+    } catch {
+      // Silently fail
+    }
+    return [];
+  }, [token]);
+
   const fetchCollectionDocs = useCallback(async (name: string) => {
     if (!token) return;
     setLoading(true);
@@ -101,6 +122,7 @@ export function useMongoExecution(token: string | null) {
     dbName,
     executeCommand,
     fetchCollections,
+    fetchHistory,
     fetchCollectionDocs,
     clearResult,
   };
