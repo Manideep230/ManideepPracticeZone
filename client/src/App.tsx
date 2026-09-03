@@ -27,7 +27,7 @@ function App() {
     fetchCollectionDocs,
   } = useMongoExecution(token);
 
-  const [editorValue, setEditorValue] = useState('db.createCollection("users")');
+  const [editorValue, setEditorValue] = useState('');
   const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>([]);
 
   // Fetch permanent command history on sign-in
