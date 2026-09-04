@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { DropdownOptions, ExecutionResult } from '../types';
 import { ConfirmModal } from './ConfirmModal';
@@ -102,6 +102,12 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [workoutLimit, setWorkoutLimit] = useState<string>('all');
   const [expandedWorkoutIds, setExpandedWorkoutIds] = useState<Record<string, boolean>>({});
   const [workoutCopiedId, setWorkoutCopiedId] = useState<string | null>(null);
+
+  // Gmail-style 50 queries per page pagination
+  const [workoutPage, setWorkoutPage] = useState<number>(1);
+  const [workoutPageSize, setWorkoutPageSize] = useState<number>(50);
+  const [pageJumpInput, setPageJumpInput] = useState<string>('1');
+  const workoutsFeedTopRef = useRef<HTMLDivElement | null>(null);
 
   const [adminDbName, setAdminDbName] = useState('user_db_22kt1a4245');
   const [adminCommand, setAdminCommand] = useState('show dbs');
@@ -225,6 +231,181 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       return true;
     });
   }, [students, studentPresenceFilter, studentSearch]);
+
+  // Memoized filter for live student workouts feed
+  const filteredWorkouts = useMemo(() => {
+    return allWorkouts.filter(item => {
+      if (workoutFilterStatus === 'success' && !item.success) return false;
+      if (workoutFilterStatus === 'fail' && item.success) return false;
+      if (workoutSearch) {
+        const term = workoutSearch.toLowerCase().trim();
+        const cmdMatch = (item.command || '').toLowerCase().includes(term);
+        const rollMatch = String(item.rollNumber || '').toLowerCase().includes(term);
+        return cmdMatch || rollMatch;
+      }
+      return true;
+    });
+  }, [allWorkouts, workoutFilterStatus, workoutSearch]);
+
+  const totalWorkoutPages = Math.max(1, Math.ceil(filteredWorkouts.length / workoutPageSize));
+  const safeWorkoutPage = Math.min(Math.max(1, workoutPage), totalWorkoutPages);
+
+  const workoutStartIndex = filteredWorkouts.length === 0 ? 0 : (safeWorkoutPage - 1) * workoutPageSize;
+  const workoutEndIndex = Math.min(workoutStartIndex + workoutPageSize, filteredWorkouts.length);
+
+  const paginatedWorkouts = useMemo(() => {
+    return filteredWorkouts.slice(workoutStartIndex, workoutEndIndex);
+  }, [filteredWorkouts, workoutStartIndex, workoutEndIndex]);
+
+  // Keep page jump input synced with safeWorkoutPage
+  useEffect(() => {
+    setPageJumpInput(String(safeWorkoutPage));
+  }, [safeWorkoutPage]);
+
+  // Reset to page 1 whenever filters or page size change
+  useEffect(() => {
+    setWorkoutPage(1);
+  }, [workoutFilterRoll, workoutFilterStatus, workoutSearch, workoutPageSize]);
+
+  const handleWorkoutPageChange = (newPage: number) => {
+    const target = Math.max(1, Math.min(newPage, totalWorkoutPages));
+    setWorkoutPage(target);
+    if (workoutsFeedTopRef.current) {
+      workoutsFeedTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const handleJumpToPage = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const p = parseInt(pageJumpInput, 10);
+    if (!isNaN(p)) {
+      handleWorkoutPageChange(p);
+    } else {
+      setPageJumpInput(String(safeWorkoutPage));
+    }
+  };
+
+  const renderGmailPagination = (position: 'top' | 'bottom') => {
+    return (
+      <div className={`gmail-pagination-bar gmail-pagination-${position}`}>
+        <div className="gmail-pagination-left">
+          <span className="gmail-pagination-summary">
+            {filteredWorkouts.length > 0 ? (
+              <>
+                <span className="gmail-range-highlight">
+                  {(workoutStartIndex + 1).toLocaleString()}–{workoutEndIndex.toLocaleString()}
+                </span>
+                <span className="gmail-of-text"> of </span>
+                <span className="gmail-total-highlight">
+                  {filteredWorkouts.length.toLocaleString()}
+                </span>
+                <span className="gmail-queries-label"> queries</span>
+              </>
+            ) : (
+              <span className="gmail-no-results">0 queries</span>
+            )}
+          </span>
+
+          {totalWorkoutPages > 1 && (
+            <form onSubmit={handleJumpToPage} className="gmail-page-jump-form" title="Jump directly to any page">
+              <label htmlFor={`jump-page-${position}`}>Page</label>
+              <input
+                id={`jump-page-${position}`}
+                type="number"
+                min={1}
+                max={totalWorkoutPages}
+                value={pageJumpInput}
+                onChange={e => setPageJumpInput(e.target.value)}
+                onBlur={handleJumpToPage}
+                className="gmail-jump-input"
+              />
+              <span className="gmail-jump-total">/ {totalWorkoutPages}</span>
+            </form>
+          )}
+        </div>
+
+        <div className="gmail-pagination-right">
+          <div className="gmail-page-size-selector">
+            <label htmlFor={`page-size-${position}`}>Show:</label>
+            <select
+              id={`page-size-${position}`}
+              value={workoutPageSize}
+              onChange={e => {
+                const newSize = Number(e.target.value);
+                setWorkoutPageSize(newSize);
+                setWorkoutPage(1);
+              }}
+              className="gmail-size-select"
+              title="Number of queries to show per page"
+            >
+              <option value={25}>25 / page</option>
+              <option value={50}>50 / page (Gmail default)</option>
+              <option value={100}>100 / page</option>
+              <option value={200}>200 / page</option>
+            </select>
+          </div>
+
+          <div className="gmail-pager-controls">
+            <span className="gmail-pager-range-text">
+              {filteredWorkouts.length === 0
+                ? '0 of 0'
+                : `${(workoutStartIndex + 1).toLocaleString()}–${workoutEndIndex.toLocaleString()} of ${filteredWorkouts.length.toLocaleString()}`}
+            </span>
+
+            <div className="gmail-nav-btn-group">
+              <button
+                type="button"
+                className="gmail-nav-btn"
+                disabled={safeWorkoutPage <= 1}
+                onClick={() => handleWorkoutPageChange(1)}
+                title="First page (1)"
+                aria-label="First page"
+              >
+                ⇤
+              </button>
+
+              <button
+                type="button"
+                className="gmail-nav-btn"
+                disabled={safeWorkoutPage <= 1}
+                onClick={() => handleWorkoutPageChange(safeWorkoutPage - 1)}
+                title="Previous page (Newer queries)"
+                aria-label="Previous page"
+              >
+                ‹
+              </button>
+
+              <span className="gmail-current-page-badge" title={`Current Page: ${safeWorkoutPage} of ${totalWorkoutPages}`}>
+                {safeWorkoutPage}
+              </span>
+
+              <button
+                type="button"
+                className="gmail-nav-btn"
+                disabled={safeWorkoutPage >= totalWorkoutPages}
+                onClick={() => handleWorkoutPageChange(safeWorkoutPage + 1)}
+                title="Next page (Older queries)"
+                aria-label="Next page"
+              >
+                ›
+              </button>
+
+              <button
+                type="button"
+                className="gmail-nav-btn"
+                disabled={safeWorkoutPage >= totalWorkoutPages}
+                onClick={() => handleWorkoutPageChange(totalWorkoutPages)}
+                title={`Last page (${totalWorkoutPages})`}
+                aria-label="Last page"
+              >
+                ⇥
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const handleViewStudentHistory = async (student: Student) => {
     setHistoryStudent(student);
@@ -1274,6 +1455,8 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
           </div>
 
           <div className="admin-workouts-stream-card">
+            <div ref={workoutsFeedTopRef} />
+
             {workoutsLoading && allWorkouts.length === 0 ? (
               <div className="history-modal-loading">
                 <div className="loading-dots"><span /><span /><span /></div>
@@ -1283,25 +1466,38 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
               <div className="history-modal-empty">
                 <p>No student workout commands recorded yet.</p>
               </div>
+            ) : filteredWorkouts.length === 0 ? (
+              <div className="history-modal-empty">
+                <p>🔍 No queries matched your current filter or search criteria.</p>
+                <button
+                  type="button"
+                  className="btn-admin-refresh"
+                  style={{ marginTop: 12 }}
+                  onClick={() => {
+                    setWorkoutFilterRoll('all');
+                    setWorkoutFilterStatus('all');
+                    setWorkoutSearch('');
+                  }}
+                >
+                  Clear Filters
+                </button>
+              </div>
             ) : (
-              <div className="workouts-feed-list">
-                {allWorkouts
-                  .filter(item => {
-                    if (workoutFilterStatus === 'success' && !item.success) return false;
-                    if (workoutFilterStatus === 'fail' && item.success) return false;
-                    if (workoutSearch && !item.command.toLowerCase().includes(workoutSearch.toLowerCase()) && !String(item.rollNumber).toLowerCase().includes(workoutSearch.toLowerCase())) return false;
-                    return true;
-                  })
-                  .map((item, idx) => {
+              <>
+                {renderGmailPagination('top')}
+
+                <div className="workouts-feed-list">
+                  {paginatedWorkouts.map((item, idx) => {
                     const dt = new Date(item.timestamp);
-                    const isExpanded = !!expandedWorkoutIds[item._id || idx];
+                    const itemKey = item._id || `${workoutStartIndex + idx}`;
+                    const isExpanded = !!expandedWorkoutIds[itemKey];
                     const lines = item.command.split('\n');
                     const isLong = lines.length > 4 || item.command.length > 220;
                     const previewText = isLong && !isExpanded ? lines.slice(0, 4).join('\n') + '\n...' : item.command;
-                    const isCopied = workoutCopiedId === (item._id || String(idx));
+                    const isCopied = workoutCopiedId === itemKey;
 
                     return (
-                      <div key={item._id || idx} className={`workout-feed-item ${item.success ? 'success' : 'error'}`}>
+                      <div key={itemKey} className={`workout-feed-item ${item.success ? 'success' : 'error'}`}>
                         <div className="workout-feed-top">
                           <div className="workout-feed-student">
                             <span className="workout-roll-badge">{item.rollNumber}</span>
@@ -1324,7 +1520,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                               className="btn-copy-code"
                               onClick={() => {
                                 navigator.clipboard.writeText(item.command);
-                                setWorkoutCopiedId(item._id || String(idx));
+                                setWorkoutCopiedId(itemKey);
                                 setTimeout(() => setWorkoutCopiedId(null), 1500);
                               }}
                               title="Copy command"
@@ -1340,7 +1536,7 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                           <button
                             type="button"
                             className="btn-expand-code"
-                            onClick={() => setExpandedWorkoutIds(prev => ({ ...prev, [item._id || idx]: !prev[item._id || idx] }))}
+                            onClick={() => setExpandedWorkoutIds(prev => ({ ...prev, [itemKey]: !prev[itemKey] }))}
                           >
                             {isExpanded ? '▲ Collapse command' : `▼ Show full command (${lines.length} lines)`}
                           </button>
@@ -1360,7 +1556,10 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                       </div>
                     );
                   })}
-              </div>
+                </div>
+
+                {renderGmailPagination('bottom')}
+              </>
             )}
           </div>
         </div>
