@@ -680,6 +680,68 @@ export function createAuthRouter(): Router {
     }
   });
 
+  // ADMIN: Change Student Password by Roll Number (Zero Data Loss)
+  router.post('/admin/students/reset-password', async (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace('Bearer ', '') : undefined;
+    const session = parseToken(token);
+
+    if (!session || !session.isAdmin) {
+      res.status(403).json({ success: false, error: 'Access denied. Admin privileges required.' });
+      return;
+    }
+
+    try {
+      const { rollNumber, newPassword } = req.body;
+
+      if (!rollNumber || typeof rollNumber !== 'string' || !rollNumber.trim()) {
+        res.status(400).json({ success: false, error: 'Please provide a valid student Roll Number.' });
+        return;
+      }
+
+      if (!newPassword || typeof newPassword !== 'string' || newPassword.trim().length < 4) {
+        res.status(400).json({ success: false, error: 'New password must be at least 4 characters long.' });
+        return;
+      }
+
+      const cleanRoll = rollNumber.trim().toUpperCase();
+      const client = await getMongoClient();
+      const usersColl = client.db('manideep_practice_app').collection('users');
+
+      // Find user case-insensitively
+      const targetUser = await usersColl.findOne({
+        rollNumber: { $regex: new RegExp(`^${cleanRoll.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+      });
+
+      if (!targetUser) {
+        res.status(404).json({ success: false, error: `Student with Roll Number "${cleanRoll}" was not found.` });
+        return;
+      }
+
+      // Hash the new password using the exact same salt & algorithm
+      const hashedPassword = hashPassword(newPassword.trim());
+
+      // Update ONLY password and updatedAt timestamp - 100% Zero Data Loss!
+      await usersColl.updateOne(
+        { _id: targetUser._id },
+        {
+          $set: {
+            password: hashedPassword,
+            updatedAt: new Date()
+          }
+        }
+      );
+
+      res.json({
+        success: true,
+        message: `Password for student "${targetUser.rollNumber}" was changed successfully with zero data loss!`,
+        rollNumber: targetUser.rollNumber
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: 'Failed to update student password: ' + error.message });
+    }
+  });
+
   // ADMIN: Delete / Remove Student
   router.delete('/admin/students/:id', async (req: Request, res: Response) => {
     const authHeader = req.headers.authorization;

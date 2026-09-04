@@ -84,6 +84,16 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
+  // Password Reset Modal & Confirmation Popup state
+  const [showResetPwdModal, setShowResetPwdModal] = useState(false);
+  const [resetRollNumber, setResetRollNumber] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resetPwdError, setResetPwdError] = useState<string | null>(null);
+  const [showPwdVisibility, setShowPwdVisibility] = useState(false);
+  const [resetPwdLoading, setResetPwdLoading] = useState(false);
+  const [pendingPasswordReset, setPendingPasswordReset] = useState<{ rollNumber: string; newPassword: string } | null>(null);
+
   // Student History Inspection Modal state
   const [historyStudent, setHistoryStudent] = useState<Student | null>(null);
   const [studentHistory, setStudentHistory] = useState<any[]>([]);
@@ -476,6 +486,81 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
       setStatusMsg({ type: 'error', text: 'Network error removing student' });
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  // Open Password Reset Modal
+  const handleOpenPasswordResetModal = (targetRoll?: string) => {
+    setResetRollNumber(targetRoll || '');
+    setResetNewPassword('');
+    setResetConfirmPassword('');
+    setResetPwdError(null);
+    setShowPwdVisibility(false);
+    setShowResetPwdModal(true);
+  };
+
+  // Trigger Confirmation Popup for Password Reset
+  const handleInitiatePasswordReset = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setResetPwdError(null);
+
+    const cleanRoll = resetRollNumber.trim().toUpperCase();
+    if (!cleanRoll) {
+      setResetPwdError('Please enter a valid student Roll Number.');
+      return;
+    }
+
+    if (!resetNewPassword || resetNewPassword.trim().length < 4) {
+      setResetPwdError('New password must be at least 4 characters long.');
+      return;
+    }
+
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetPwdError('New password and Confirm password do not match.');
+      return;
+    }
+
+    // Trigger confirmation popup before changing password with zero data loss guarantee
+    setPendingPasswordReset({
+      rollNumber: cleanRoll,
+      newPassword: resetNewPassword.trim()
+    });
+  };
+
+  // Perform actual password reset after confirmation
+  const handleConfirmPasswordReset = async () => {
+    if (!pendingPasswordReset || !token) return;
+    const { rollNumber, newPassword } = pendingPasswordReset;
+    setPendingPasswordReset(null);
+    setResetPwdLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/admin/students/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ rollNumber, newPassword })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setStatusMsg({ type: 'error', text: data.error || 'Failed to update student password.' });
+      } else {
+        setStatusMsg({
+          type: 'success',
+          text: `✅ ${data.message || `Password for student "${rollNumber}" changed successfully with zero data loss!`}`
+        });
+        setShowResetPwdModal(false);
+        setResetRollNumber('');
+        setResetNewPassword('');
+        setResetConfirmPassword('');
+      }
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: 'Network error updating password: ' + (err.message || String(err)) });
+    } finally {
+      setResetPwdLoading(false);
     }
   };
 
@@ -1186,6 +1271,15 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
 
                 <button
                   type="button"
+                  className="btn-admin-reset-pwd"
+                  onClick={() => handleOpenPasswordResetModal()}
+                  title="Change student password by roll number (Zero Data Loss)"
+                >
+                  🔑 Change User Password
+                </button>
+
+                <button
+                  type="button"
                   className="btn-admin-export"
                   onClick={handleOpenReportModal}
                   title="Generate custom student performance report with date range, time-to-time window, and hourly performance breakdown"
@@ -1302,6 +1396,14 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                               title={`View full workout command history for ${s.rollNumber}`}
                             >
                               📜 History ({s.workout?.total || 0})
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-student-password"
+                              onClick={() => handleOpenPasswordResetModal(s.rollNumber)}
+                              title={`Change password for student ${s.rollNumber} with zero data loss`}
+                            >
+                              🔑 Reset Pass
                             </button>
                             <button
                               type="button"
@@ -1687,6 +1789,160 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
         onConfirm={handleConfirmExecuteDeleteCmd}
         onCancel={() => setPendingDeleteCmd(null)}
       />
+
+      {/* Student Password Reset Confirmation Popup */}
+      <ConfirmModal
+        isOpen={!!pendingPasswordReset}
+        title="Confirm Password Change"
+        message={`Are you sure you want to change the password for student "${pendingPasswordReset?.rollNumber}"? This will only update their login password. Their existing database sandbox, collections, and workout history will be 100% preserved with zero data loss.`}
+        confirmText="Yes, Change Password"
+        cancelText="Cancel"
+        isDanger={false}
+        onConfirm={handleConfirmPasswordReset}
+        onCancel={() => setPendingPasswordReset(null)}
+      />
+
+      {/* Admin Password Reset Modal */}
+      {showResetPwdModal && (
+        <div className="modal-overlay" onClick={() => !resetPwdLoading && setShowResetPwdModal(false)}>
+          <div className="modal-card modal-reset-password" onClick={e => e.stopPropagation()}>
+            <div className="modal-card-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', padding: '8px', borderRadius: '10px', display: 'flex' }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Change Student Password</h3>
+                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    Safely update user credentials with guaranteed zero data loss
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn-modal-close"
+                onClick={() => !resetPwdLoading && setShowResetPwdModal(false)}
+                disabled={resetPwdLoading}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="zero-dataloss-badge">
+              <span className="shield-icon">🛡️</span>
+              <div className="zero-dataloss-text">
+                <strong>Zero Data Loss Protection:</strong> Updating password modifies only credentials. All student database collections, sandbox documents, and workout history remain completely untouched.
+              </div>
+            </div>
+
+            {resetPwdError && (
+              <div className="admin-alert error" style={{ margin: '0 0 16px 0' }}>
+                <span>{resetPwdError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleInitiatePasswordReset} className="reset-pwd-form">
+              <div className="form-group">
+                <label htmlFor="reset-roll-input">
+                  Student Roll Number <span style={{ color: 'var(--error)' }}>*</span>
+                </label>
+                <input
+                  id="reset-roll-input"
+                  type="text"
+                  placeholder="e.g. 22KT1A4201"
+                  value={resetRollNumber}
+                  onChange={e => {
+                    setResetRollNumber(e.target.value.toUpperCase());
+                    setResetPwdError(null);
+                  }}
+                  disabled={resetPwdLoading}
+                  list="registered-students-list"
+                  autoFocus
+                  required
+                />
+                <datalist id="registered-students-list">
+                  {students.map(s => (
+                    <option key={s._id} value={s.rollNumber}>
+                      {s.rollNumber} - {s.collegeName || ''} ({s.branch || ''})
+                    </option>
+                  ))}
+                </datalist>
+                <span className="form-helper">Enter student roll number or select from registered students.</span>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="reset-new-pass-input">
+                  New Password <span style={{ color: 'var(--error)' }}>*</span>
+                </label>
+                <div className="password-input-wrapper">
+                  <input
+                    id="reset-new-pass-input"
+                    type={showPwdVisibility ? 'text' : 'password'}
+                    placeholder="Enter new password (min. 4 characters)..."
+                    value={resetNewPassword}
+                    onChange={e => {
+                      setResetNewPassword(e.target.value);
+                      setResetPwdError(null);
+                    }}
+                    disabled={resetPwdLoading}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="btn-toggle-pwd"
+                    onClick={() => setShowPwdVisibility(!showPwdVisibility)}
+                    tabIndex={-1}
+                    title={showPwdVisibility ? 'Hide password' : 'Show password'}
+                  >
+                    {showPwdVisibility ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="reset-confirm-pass-input">
+                  Confirm New Password <span style={{ color: 'var(--error)' }}>*</span>
+                </label>
+                <input
+                  id="reset-confirm-pass-input"
+                  type={showPwdVisibility ? 'text' : 'password'}
+                  placeholder="Re-enter new password..."
+                  value={resetConfirmPassword}
+                  onChange={e => {
+                    setResetConfirmPassword(e.target.value);
+                    setResetPwdError(null);
+                  }}
+                  disabled={resetPwdLoading}
+                  required
+                />
+              </div>
+
+              <div className="modal-actions" style={{ marginTop: '20px' }}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowResetPwdModal(false)}
+                  disabled={resetPwdLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-run"
+                  disabled={resetPwdLoading || !resetRollNumber.trim() || !resetNewPassword.trim()}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                >
+                  {resetPwdLoading ? 'Updating...' : 'Continue to Confirmation →'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
 
       {/* Upgraded Student Command History Inspection Modal */}
       {historyStudent && (
