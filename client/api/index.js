@@ -760,28 +760,42 @@ router.get('/admin/students', async (req, res) => {
 
     const nowMs = Date.now();
     const studentsWithPresence = students.map(s => {
-      const lastHbMs = s.lastHeartbeat ? new Date(s.lastHeartbeat).getTime() : 0;
-      const lastActMs = s.lastActive ? new Date(s.lastActive).getTime() : lastHbMs;
+      const cleanRoll = String(s.rollNumber).trim().toUpperCase();
+      const w = workoutMap.get(cleanRoll) || { totalCommands: 0, successCount: 0, failCount: 0, lastWorkout: null };
 
-      const isHeartbeatActive = (nowMs - lastHbMs) < 65000 && s.isOnline !== false;
+      const lastWorkoutMs = w && w.lastWorkout ? new Date(w.lastWorkout).getTime() : 0;
+      const lastHbMs = s.lastHeartbeat ? new Date(s.lastHeartbeat).getTime() : 0;
+      const sLastActMs = s.lastActive ? new Date(s.lastActive).getTime() : 0;
+
+      const maxRecentActivityMs = Math.max(sLastActMs, lastHbMs, lastWorkoutMs);
+      const lastActMs = maxRecentActivityMs > 0 ? maxRecentActivityMs : (s.createdAt ? new Date(s.createdAt).getTime() : nowMs);
+
+      const hasRecentWorkout = lastWorkoutMs > 0 && (nowMs - lastWorkoutMs) < 5 * 60 * 1000;
+      const isHeartbeatActive = ((nowMs - lastHbMs) < 65000 || hasRecentWorkout) && s.isOnline !== false;
+
       const idleMs = Math.max(0, nowMs - lastActMs);
       const idleMins = Math.floor(idleMs / 60000);
 
       let presenceStatus = 'offline';
       if (isHeartbeatActive) {
-        if (s.isIdle || idleMs >= 5 * 60 * 1000) {
-          presenceStatus = 'idle';
-        } else {
+        if (hasRecentWorkout || (!s.isIdle && idleMs < 5 * 60 * 1000)) {
           presenceStatus = 'online';
+        } else {
+          presenceStatus = 'idle';
         }
       }
-
-      const cleanRoll = String(s.rollNumber).trim().toUpperCase();
-      const w = workoutMap.get(cleanRoll) || { totalCommands: 0, successCount: 0, failCount: 0, lastWorkout: null };
 
       let resolvedCollege = s.collegeName;
       if (singleCollege && (!resolvedCollege || resolvedCollege === 'PBR VITS' || !currentColleges.includes(resolvedCollege))) {
         resolvedCollege = singleCollege;
+      }
+
+      let resolvedLastActive = s.lastActive || s.lastHeartbeat || s.createdAt;
+      if (lastWorkoutMs > 0) {
+        const sActMs = s.lastActive ? new Date(s.lastActive).getTime() : 0;
+        if (lastWorkoutMs > sActMs) {
+          resolvedLastActive = w.lastWorkout;
+        }
       }
 
       return {
@@ -789,7 +803,7 @@ router.get('/admin/students', async (req, res) => {
         collegeName: resolvedCollege,
         presenceStatus,
         idleMinutes: idleMins,
-        lastActiveTime: s.lastActive || s.lastHeartbeat || s.createdAt,
+        lastActiveTime: resolvedLastActive,
         workout: {
           total: w.totalCommands,
           success: w.successCount,
@@ -1814,15 +1828,24 @@ async function executeSingleCommand(cmdStr, session, overrideDb) {
 
     try {
       const appDb = mongoClient.db('manideep_practice_app');
+      const now = new Date();
+      const cleanRoll = String(session.rollNumber).trim().toUpperCase();
+
       await appDb.collection('command_histories').insertOne({
-        rollNumber: String(session.rollNumber).trim().toUpperCase(),
+        rollNumber: cleanRoll,
         command: cmdStr,
-        timestamp: new Date(),
+        timestamp: now,
         success: true,
         executionTime,
         message,
         documentCount: documentCount !== undefined ? documentCount : (Array.isArray(result) ? result.length : undefined)
       });
+
+      // Update student presence instantly on active command execution
+      await appDb.collection('users').updateOne(
+        { rollNumber: cleanRoll },
+        { $set: { lastActive: now, lastHeartbeat: now, isOnline: true, isIdle: false } }
+      );
     } catch {}
 
     return {

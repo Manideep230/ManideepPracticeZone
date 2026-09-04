@@ -1011,20 +1011,29 @@ async function executeSingleCommand(cmdStr: string, session: any, overrideDb?: s
 
     const executionTime = Date.now() - startTime;
 
-    // Save individual command execution history to MongoDB permanently
+    // Save individual command execution history to MongoDB permanently & update student presence
     try {
       const appDb = mongoClient.db('manideep_practice_app');
+      const now = new Date();
+      const cleanRoll = String(session.rollNumber).trim().toUpperCase();
+
       await appDb.collection('command_histories').insertOne({
-        rollNumber: String(session.rollNumber).trim().toUpperCase(),
+        rollNumber: cleanRoll,
         command: cmdStr,
-        timestamp: new Date(),
+        timestamp: now,
         success: true,
         executionTime,
         message,
         documentCount: documentCount !== undefined ? documentCount : (Array.isArray(result) ? result.length : undefined)
       });
+
+      // Update student presence instantly on active command execution
+      await appDb.collection('users').updateOne(
+        { rollNumber: cleanRoll },
+        { $set: { lastActive: now, lastHeartbeat: now, isOnline: true, isIdle: false } }
+      );
     } catch {
-      // Silently ignore history save failures
+      // Silently ignore history/presence update failures
     }
 
     return {
