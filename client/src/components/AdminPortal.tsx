@@ -64,7 +64,18 @@ function formatDayLabel(date: Date): string {
 export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
   const [options, setOptions] = useState<DropdownOptions>({ colleges: [], branches: [], years: [] });
   const [students, setStudents] = useState<Student[]>([]);
-  const [activeTab, setActiveTab] = useState<'options' | 'students' | 'workouts' | 'playground'>('students');
+  const [activeTab, setActiveTab] = useState<'options' | 'students' | 'directory' | 'workouts' | 'playground'>('students');
+
+  // Advanced Multi-Filter Student Directory state
+  const [dirPresenceFilter, setDirPresenceFilter] = useState<'all' | 'online' | 'idle' | 'offline' | 'disabled'>('all');
+  const [dirCollegeFilter, setDirCollegeFilter] = useState<string>('all');
+  const [dirBranchFilter, setDirBranchFilter] = useState<string>('all');
+  const [dirYearFilter, setDirYearFilter] = useState<string>('all');
+  const [dirWorkoutFilter, setDirWorkoutFilter] = useState<'all' | 'has_workouts' | 'no_workouts' | 'high_activity' | 'has_failures'>('all');
+  const [dirSearchQuery, setDirSearchQuery] = useState<string>('');
+  const [dirSortBy, setDirSortBy] = useState<'recent_active' | 'roll_asc' | 'roll_desc' | 'commands_desc' | 'created_newest'>('recent_active');
+  const [dirPage, setDirPage] = useState<number>(1);
+  const [dirPageSize, setDirPageSize] = useState<number>(50);
   
   // Options management form state
   const [newCollege, setNewCollege] = useState('');
@@ -926,6 +937,164 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
     }
   };
 
+  // Advanced Multi-Filter Student Directory computations
+  const directoryStudents = useMemo(() => {
+    let result = [...students];
+
+    // Presence status filter
+    if (dirPresenceFilter !== 'all') {
+      if (dirPresenceFilter === 'disabled') {
+        result = result.filter(s => s.isDisabled);
+      } else {
+        result = result.filter(s => !s.isDisabled && (s.presenceStatus || 'offline') === dirPresenceFilter);
+      }
+    }
+
+    // College filter
+    if (dirCollegeFilter !== 'all') {
+      result = result.filter(s => (s.collegeName || '').toLowerCase() === dirCollegeFilter.toLowerCase());
+    }
+
+    // Branch filter
+    if (dirBranchFilter !== 'all') {
+      result = result.filter(s => (s.branch || '').toLowerCase() === dirBranchFilter.toLowerCase());
+    }
+
+    // Year filter
+    if (dirYearFilter !== 'all') {
+      result = result.filter(s => (s.year || '').toLowerCase() === dirYearFilter.toLowerCase());
+    }
+
+    // Workout activity filter
+    if (dirWorkoutFilter !== 'all') {
+      if (dirWorkoutFilter === 'has_workouts') {
+        result = result.filter(s => s.workout && s.workout.total > 0);
+      } else if (dirWorkoutFilter === 'no_workouts') {
+        result = result.filter(s => !s.workout || s.workout.total === 0);
+      } else if (dirWorkoutFilter === 'high_activity') {
+        result = result.filter(s => s.workout && s.workout.total >= 20);
+      } else if (dirWorkoutFilter === 'has_failures') {
+        result = result.filter(s => s.workout && s.workout.failed > 0);
+      }
+    }
+
+    // Search query filter (roll, phone, college, branch, year, userDbName)
+    if (dirSearchQuery.trim()) {
+      const q = dirSearchQuery.trim().toLowerCase();
+      result = result.filter(s =>
+        s.rollNumber.toLowerCase().includes(q) ||
+        s.mobileNumber.toLowerCase().includes(q) ||
+        (s.collegeName || '').toLowerCase().includes(q) ||
+        (s.branch || '').toLowerCase().includes(q) ||
+        (s.year || '').toLowerCase().includes(q) ||
+        s.userDbName.toLowerCase().includes(q)
+      );
+    }
+
+    // Sorting
+    result.sort((a, b) => {
+      if (dirSortBy === 'recent_active') {
+        const timeA = a.lastActiveTime ? new Date(a.lastActiveTime).getTime() : 0;
+        const timeB = b.lastActiveTime ? new Date(b.lastActiveTime).getTime() : 0;
+        return timeB - timeA;
+      }
+      if (dirSortBy === 'roll_asc') {
+        return a.rollNumber.localeCompare(b.rollNumber);
+      }
+      if (dirSortBy === 'roll_desc') {
+        return b.rollNumber.localeCompare(a.rollNumber);
+      }
+      if (dirSortBy === 'commands_desc') {
+        const totalA = a.workout ? a.workout.total : 0;
+        const totalB = b.workout ? b.workout.total : 0;
+        return totalB - totalA;
+      }
+      if (dirSortBy === 'created_newest') {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      }
+      return 0;
+    });
+
+    return result;
+  }, [students, dirPresenceFilter, dirCollegeFilter, dirBranchFilter, dirYearFilter, dirWorkoutFilter, dirSearchQuery, dirSortBy]);
+
+  const dirMetrics = useMemo(() => {
+    let onlineCount = 0;
+    let idleCount = 0;
+    let offlineCount = 0;
+    let disabledCount = 0;
+    let totalCommands = 0;
+
+    directoryStudents.forEach(s => {
+      if (s.isDisabled) {
+        disabledCount++;
+      } else {
+        const status = s.presenceStatus || 'offline';
+        if (status === 'online') onlineCount++;
+        else if (status === 'idle') idleCount++;
+        else offlineCount++;
+      }
+
+      if (s.workout) {
+        totalCommands += s.workout.total;
+      }
+    });
+
+    return {
+      total: directoryStudents.length,
+      onlineCount,
+      idleCount,
+      offlineCount,
+      disabledCount,
+      totalCommands
+    };
+  }, [directoryStudents]);
+
+  const totalDirPages = Math.max(1, Math.ceil(directoryStudents.length / dirPageSize));
+  const dirStartIndex = (dirPage - 1) * dirPageSize;
+  const dirEndIndex = Math.min(dirStartIndex + dirPageSize, directoryStudents.length);
+  const paginatedDirectoryStudents = useMemo(() => {
+    return directoryStudents.slice(dirStartIndex, dirEndIndex);
+  }, [directoryStudents, dirStartIndex, dirEndIndex]);
+
+  const handleExportDirectoryToExcel = () => {
+    if (directoryStudents.length === 0) {
+      setStatusMsg({ type: 'error', text: 'No matching students to export.' });
+      return;
+    }
+
+    try {
+      const dataToExport = directoryStudents.map((s, idx) => ({
+        'S.No': idx + 1,
+        'Roll Number': s.rollNumber,
+        'Mobile Number': s.mobileNumber,
+        'College Name': s.collegeName || 'N/A',
+        'Branch': s.branch || 'N/A',
+        'Year': s.year || 'N/A',
+        'Presence Status': s.isDisabled ? 'Disabled' : (s.presenceStatus ? s.presenceStatus.toUpperCase() : 'OFFLINE'),
+        'Idle Minutes': s.idleMinutes || 0,
+        'Total Commands': s.workout?.total || 0,
+        'Successful Commands': s.workout?.success || 0,
+        'Failed Commands': s.workout?.failed || 0,
+        'Last Workout Time': s.workout?.lastWorkoutTime ? new Date(s.workout.lastWorkoutTime).toLocaleString() : 'N/A',
+        'Last Active Time': s.lastActiveTime ? new Date(s.lastActiveTime).toLocaleString() : 'N/A',
+        'Atlas Sandbox DB': s.userDbName,
+        'Created At': s.createdAt ? new Date(s.createdAt).toLocaleString() : 'N/A'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Students_Directory');
+      const fileName = `Student_Directory_Export_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(workbook, fileName);
+      setStatusMsg({ type: 'success', text: `Exported ${directoryStudents.length} student records to Excel!` });
+    } catch (err: any) {
+      setStatusMsg({ type: 'error', text: 'Failed to export directory: ' + (err.message || String(err)) });
+    }
+  };
+
   const handleAddCollege = () => {
     if (!newCollege.trim()) return;
     const updated = { ...options, colleges: [...options.colleges, newCollege.trim()] };
@@ -1052,6 +1221,12 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
           onClick={() => setActiveTab('students')}
         >
           👥 Registered Students ({students.length})
+        </button>
+        <button
+          className={`admin-tab ${activeTab === 'directory' ? 'active' : ''}`}
+          onClick={() => setActiveTab('directory')}
+        >
+          🔍 Advanced Directory &amp; Filters ({directoryStudents.length})
         </button>
         <button
           className={`admin-tab ${activeTab === 'workouts' ? 'active' : ''}`}
@@ -1439,6 +1614,404 @@ export function AdminPortal({ token, onGoToPlayground }: AdminPortalProps) {
                       </tr>
                     );
                   }))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : activeTab === 'directory' ? (
+        /* TAB: Advanced Multi-Filter Student Directory */
+        <div className="admin-directory-section">
+          {/* Top Summary Metrics Header Bar */}
+          <div className="directory-metrics-bar">
+            <div className="metric-card total">
+              <span className="metric-value">{dirMetrics.total}</span>
+              <span className="metric-label">👥 Matching Students</span>
+            </div>
+            <div className="metric-card online">
+              <span className="metric-value">🟢 {dirMetrics.onlineCount}</span>
+              <span className="metric-label">Active Now</span>
+            </div>
+            <div className="metric-card idle">
+              <span className="metric-value">🟠 {dirMetrics.idleCount}</span>
+              <span className="metric-label">Constant State</span>
+            </div>
+            <div className="metric-card offline">
+              <span className="metric-value">⚪ {dirMetrics.offlineCount}</span>
+              <span className="metric-label">Offline</span>
+            </div>
+            <div className="metric-card disabled">
+              <span className="metric-value">🚫 {dirMetrics.disabledCount}</span>
+              <span className="metric-label">Disabled</span>
+            </div>
+            <div className="metric-card workout">
+              <span className="metric-value">🏋️ {dirMetrics.totalCommands}</span>
+              <span className="metric-label">Executed Commands</span>
+            </div>
+          </div>
+
+          {/* Multi-Filter Controls Toolbar */}
+          <div className="directory-filter-card">
+            <div className="directory-filter-row">
+              <div className="filter-group">
+                <label>Presence Status:</label>
+                <select
+                  value={dirPresenceFilter}
+                  onChange={e => { setDirPresenceFilter(e.target.value as any); setDirPage(1); }}
+                  className="dir-select-input"
+                >
+                  <option value="all">All Presence States</option>
+                  <option value="online">🟢 Active Now (Online)</option>
+                  <option value="idle">🟠 Constant State (Idle)</option>
+                  <option value="offline">⚪ Offline</option>
+                  <option value="disabled">🚫 Disabled Accounts</option>
+                </select>
+              </div>
+
+              <div className="filter-group">
+                <label>College Name:</label>
+                <select
+                  value={dirCollegeFilter}
+                  onChange={e => { setDirCollegeFilter(e.target.value); setDirPage(1); }}
+                  className="dir-select-input"
+                >
+                  <option value="all">All Colleges</option>
+                  {options.colleges.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="filter-group">
+                <label>Branch:</label>
+                <select
+                  value={dirBranchFilter}
+                  onChange={e => { setDirBranchFilter(e.target.value); setDirPage(1); }}
+                  className="dir-select-input"
+                >
+                  <option value="all">All Branches</option>
+                  {options.branches.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="filter-group">
+                <label>Year:</label>
+                <select
+                  value={dirYearFilter}
+                  onChange={e => { setDirYearFilter(e.target.value); setDirPage(1); }}
+                  className="dir-select-input"
+                >
+                  <option value="all">All Years</option>
+                  {options.years.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="filter-group">
+                <label>Workout Activity:</label>
+                <select
+                  value={dirWorkoutFilter}
+                  onChange={e => { setDirWorkoutFilter(e.target.value as any); setDirPage(1); }}
+                  className="dir-select-input"
+                >
+                  <option value="all">All Activity Levels</option>
+                  <option value="has_workouts">🏋️ Has Workouts (&gt;0)</option>
+                  <option value="no_workouts">⭕ No Workouts (0)</option>
+                  <option value="high_activity">🔥 High Activity (&ge;20)</option>
+                  <option value="has_failures">❌ Has Failed Commands</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="directory-filter-row second-row">
+              <div className="filter-group search-flex">
+                <label>Search Query:</label>
+                <div className="table-search-box dir-search-box">
+                  <span className="search-icon">🔍</span>
+                  <input
+                    type="text"
+                    placeholder="Search roll, phone, college, branch, DB..."
+                    value={dirSearchQuery}
+                    onChange={e => { setDirSearchQuery(e.target.value); setDirPage(1); }}
+                  />
+                  {dirSearchQuery && (
+                    <button type="button" className="btn-clear-search" onClick={() => setDirSearchQuery('')}>×</button>
+                  )}
+                </div>
+              </div>
+
+              <div className="filter-group">
+                <label>Sort By:</label>
+                <select
+                  value={dirSortBy}
+                  onChange={e => setDirSortBy(e.target.value as any)}
+                  className="dir-select-input"
+                >
+                  <option value="recent_active">⏱️ Most Recently Active</option>
+                  <option value="roll_asc">🔤 Roll Number (A → Z)</option>
+                  <option value="roll_desc">🔤 Roll Number (Z → A)</option>
+                  <option value="commands_desc">🏋️ Most Commands Executed</option>
+                  <option value="created_newest">🆕 Account Creation (Newest First)</option>
+                </select>
+              </div>
+
+              <div className="filter-actions-group">
+                <button
+                  type="button"
+                  className="btn-reset-filters"
+                  onClick={() => {
+                    setDirPresenceFilter('all');
+                    setDirCollegeFilter('all');
+                    setDirBranchFilter('all');
+                    setDirYearFilter('all');
+                    setDirWorkoutFilter('all');
+                    setDirSearchQuery('');
+                    setDirSortBy('recent_active');
+                    setDirPage(1);
+                  }}
+                  title="Reset all filters"
+                >
+                  🔄 Reset Filters
+                </button>
+
+                <button
+                  type="button"
+                  className="btn-export-excel"
+                  onClick={handleExportDirectoryToExcel}
+                  disabled={directoryStudents.length === 0}
+                  title="Export currently filtered students list to Microsoft Excel (.xlsx)"
+                >
+                  📥 Export Excel ({directoryStudents.length})
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Directory Student Table & Pagination */}
+          <div className="admin-table-card">
+            <div className="admin-table-card-header">
+              <div className="admin-table-title-area">
+                <h3>
+                  👥 Directory Results ({directoryStudents.length} student{directoryStudents.length !== 1 ? 's' : ''})
+                </h3>
+              </div>
+              <div className="gmail-pagination-controls">
+                <span className="pagination-info">
+                  Showing {directoryStudents.length === 0 ? 0 : dirStartIndex + 1}–{dirEndIndex} of {directoryStudents.length}
+                </span>
+
+                <div className="pagination-nav-group">
+                  <button
+                    type="button"
+                    className="btn-page-nav"
+                    disabled={dirPage <= 1}
+                    onClick={() => setDirPage(1)}
+                    title="First Page"
+                  >
+                    ⇤
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-page-nav"
+                    disabled={dirPage <= 1}
+                    onClick={() => setDirPage(prev => Math.max(1, prev - 1))}
+                    title="Previous Page"
+                  >
+                    ◄
+                  </button>
+                  <span className="page-current-display">Page {dirPage} of {totalDirPages}</span>
+                  <button
+                    type="button"
+                    className="btn-page-nav"
+                    disabled={dirPage >= totalDirPages}
+                    onClick={() => setDirPage(prev => Math.min(totalDirPages, prev + 1))}
+                    title="Next Page"
+                  >
+                    ►
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-page-nav"
+                    disabled={dirPage >= totalDirPages}
+                    onClick={() => setDirPage(totalDirPages)}
+                    title="Last Page"
+                  >
+                    ⇥
+                  </button>
+                </div>
+
+                <div className="pagination-size-selector">
+                  <label>Per page:</label>
+                  <select
+                    value={dirPageSize}
+                    onChange={e => {
+                      setDirPageSize(Number(e.target.value));
+                      setDirPage(1);
+                    }}
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={250}>250</option>
+                    <option value={500}>500</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="admin-table-wrapper">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Roll Number</th>
+                    <th>Mobile Number</th>
+                    <th>College Name</th>
+                    <th>Branch / Year</th>
+                    <th>Live Presence</th>
+                    <th>🏋️ Workout Activity</th>
+                    <th>Account</th>
+                    <th>Atlas Sandbox DB</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedDirectoryStudents.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-secondary)' }}>
+                        <div style={{ fontSize: '16px', marginBottom: '8px' }}>🔍 No students match the selected filter criteria.</div>
+                        <button
+                          type="button"
+                          className="btn-admin-table-action"
+                          style={{ padding: '6px 16px', fontSize: '12px' }}
+                          onClick={() => {
+                            setDirPresenceFilter('all');
+                            setDirCollegeFilter('all');
+                            setDirBranchFilter('all');
+                            setDirYearFilter('all');
+                            setDirWorkoutFilter('all');
+                            setDirSearchQuery('');
+                            setDirPage(1);
+                          }}
+                        >
+                          Clear All Directory Filters
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedDirectoryStudents.map(s => {
+                      const status = s.presenceStatus || 'offline';
+                      const hasWorkout = s.workout && s.workout.total > 0;
+                      return (
+                        <tr key={s._id} className={`${s.isDisabled ? 'row-student-disabled' : ''} row-presence-${status}`}>
+                          <td><strong>{s.rollNumber}</strong></td>
+                          <td>{s.mobileNumber}</td>
+                          <td>{s.collegeName || 'N/A'}</td>
+                          <td>
+                            <div className="student-branch-year">
+                              <span className="badge-branch">{s.branch || 'N/A'}</span>
+                              <span className="badge-year">{s.year || 'N/A'}</span>
+                            </div>
+                          </td>
+                          <td>
+                            {status === 'online' ? (
+                              <span className="badge-presence online" title="Active now: executing queries or mouse/keyboard active">
+                                <span className="presence-dot online" />
+                                Active Now
+                              </span>
+                            ) : status === 'idle' ? (
+                              <span className="badge-presence idle" title="Constant state: connected but idle">
+                                <span className="presence-dot idle" />
+                                Constant State ({s.idleMinutes || 5}m idle)
+                              </span>
+                            ) : (
+                              <span className="badge-presence offline" title="Offline: disconnected">
+                                <span className="presence-dot offline" />
+                                Offline
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {hasWorkout ? (
+                              <div className="student-workout-cell">
+                                <div className="workout-summary-badge active">
+                                  <strong>{s.workout!.total}</strong> command{s.workout!.total !== 1 ? 's' : ''}
+                                </div>
+                                <div className="workout-mini-stats">
+                                  <span className="mini-success">✓ {s.workout!.success}</span>
+                                  <span className="mini-fail">✗ {s.workout!.failed}</span>
+                                  {s.workout!.lastWorkoutTime && (
+                                    <span className="mini-time">• {formatTimeAgo(s.workout!.lastWorkoutTime)}</span>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="workout-summary-badge empty">
+                                ○ No commands run
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <span className={`badge-status ${s.isDisabled ? 'disabled' : 'active'}`}>
+                              {s.isDisabled ? '🚫 Disabled' : '● Active'}
+                            </span>
+                          </td>
+                          <td><code>{s.userDbName}</code></td>
+                          <td>
+                            <div className="admin-table-action-group">
+                              <button
+                                type="button"
+                                className="btn-student-password"
+                                onClick={() => handleOpenPasswordResetModal(s.rollNumber)}
+                                title={`Change password for student ${s.rollNumber} with zero data loss`}
+                              >
+                                🔑 Reset Pass
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-student-history"
+                                onClick={() => handleViewStudentHistory(s)}
+                                title={`View full workout history for ${s.rollNumber}`}
+                              >
+                                📜 History ({s.workout?.total || 0})
+                              </button>
+                              <button
+                                type="button"
+                                className={`btn-student-toggle ${s.isDisabled ? 'enable' : 'disable'}`}
+                                onClick={() => handleToggleStudentStatus(s)}
+                                disabled={actionLoadingId === s._id}
+                                title={s.isDisabled ? 'Enable student account' : 'Disable student account'}
+                              >
+                                {s.isDisabled ? '✓ Enable' : '🚫 Disable'}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-student-delete"
+                                onClick={() => setStudentToDelete(s)}
+                                disabled={actionLoadingId === s._id}
+                                title="Remove student permanently"
+                              >
+                                🗑️ Remove
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-admin-table-action"
+                                onClick={() => {
+                                  setAdminDbName(s.userDbName);
+                                  setAdminCommand(`// Query database for ${s.rollNumber}:\nshow collections`);
+                                  setActiveTab('playground');
+                                }}
+                              >
+                                Inspect DB →
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>

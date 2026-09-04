@@ -17,9 +17,9 @@ export async function getMongoClient(): Promise<MongoClient> {
   }
 
   const client = new MongoClient(MONGO_URI, {
-    maxPoolSize: 100,               // Connection pool size for 5000+ users
-    minPoolSize: 0,                 // 0 for serverless functions fast cold-start
-    maxIdleTimeMS: 30000,           // Close idle connections
+    maxPoolSize: 500,               // High-concurrency connection pool for 100,000+ students
+    minPoolSize: 10,                // Warm pool connections
+    maxIdleTimeMS: 60000,           // Close idle connections after 60s
     connectTimeoutMS: 10000,        // Connection timeout
     serverSelectionTimeoutMS: 10000,// Server selection timeout
     retryWrites: true,
@@ -38,6 +38,15 @@ export async function getMongoClient(): Promise<MongoClient> {
         const usersColl = appDb.collection('users');
         await usersColl.createIndex({ rollNumber: 1 }, { unique: true });
         await usersColl.createIndex({ mobileNumber: 1 }, { unique: true });
+        await usersColl.createIndex({ isAdmin: 1, rollNumber: 1 });
+        await usersColl.createIndex({ isOnline: 1, lastHeartbeat: -1 });
+        await usersColl.createIndex({ lastActive: -1 });
+        await usersColl.createIndex({ collegeName: 1, branch: 1, year: 1 });
+
+        const historyColl = appDb.collection('command_histories');
+        await historyColl.createIndex({ rollNumber: 1, timestamp: -1 });
+        await historyColl.createIndex({ timestamp: -1 });
+        await historyColl.createIndex({ success: 1 });
 
         const optionsColl = appDb.collection('options');
         const opt = await optionsColl.findOne({ _id: 'dropdown_options' as any });

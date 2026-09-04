@@ -35,13 +35,49 @@ function parseToken(token) {
   }
 }
 
+// High-performance sliding window rate limiter for 100,000+ concurrent students
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 5000;
+
+function advanceRateLimiter(req, res, next) {
+  const ip = req.headers['x-forwarded-for'] || req.ip || 'anonymous';
+  const now = Date.now();
+  const record = rateLimitMap.get(ip) || { count: 0, resetTime: now + RATE_LIMIT_WINDOW_MS };
+
+  if (now > record.resetTime) {
+    record.count = 1;
+    record.resetTime = now + RATE_LIMIT_WINDOW_MS;
+  } else {
+    record.count += 1;
+  }
+
+  rateLimitMap.set(ip, record);
+
+  if (Math.random() < 0.01) {
+    for (const [key, val] of rateLimitMap.entries()) {
+      if (now > val.resetTime) rateLimitMap.delete(key);
+    }
+  }
+
+  res.setHeader('X-RateLimit-Limit', RATE_LIMIT_MAX_REQUESTS);
+  res.setHeader('X-RateLimit-Remaining', Math.max(0, RATE_LIMIT_MAX_REQUESTS - record.count));
+
+  if (record.count > RATE_LIMIT_MAX_REQUESTS) {
+    res.status(429).json({ success: false, error: 'Too many requests. Rate limit reached.' });
+    return;
+  }
+
+  if (next) next();
+}
+
 async function getMongoClient() {
   if (cachedClient) return cachedClient;
 
   const client = new MongoClient(MONGO_URI, {
-    maxPoolSize: 100,
-    minPoolSize: 0,
-    maxIdleTimeMS: 30000,
+    maxPoolSize: 500,               // High-concurrency connection pool for 100,000+ students
+    minPoolSize: 10,
+    maxIdleTimeMS: 60000,
     connectTimeoutMS: 10000,
     serverSelectionTimeoutMS: 10000,
     retryWrites: true,
@@ -59,6 +95,15 @@ async function getMongoClient() {
         const usersColl = appDb.collection('users');
         await usersColl.createIndex({ rollNumber: 1 }, { unique: true });
         await usersColl.createIndex({ mobileNumber: 1 }, { unique: true });
+        await usersColl.createIndex({ isAdmin: 1, rollNumber: 1 });
+        await usersColl.createIndex({ isOnline: 1, lastHeartbeat: -1 });
+        await usersColl.createIndex({ lastActive: -1 });
+        await usersColl.createIndex({ collegeName: 1, branch: 1, year: 1 });
+
+        const historyColl = appDb.collection('command_histories');
+        await historyColl.createIndex({ rollNumber: 1, timestamp: -1 });
+        await historyColl.createIndex({ timestamp: -1 });
+        await historyColl.createIndex({ success: 1 });
 
         const optionsColl = appDb.collection('options');
         const opt = await optionsColl.findOne({ _id: 'dropdown_options' });

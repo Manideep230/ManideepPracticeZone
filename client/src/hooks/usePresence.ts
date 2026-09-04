@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api';
 const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes constant state threshold
-const HEARTBEAT_INTERVAL_MS = 30 * 1000;  // Send heartbeat every 30 seconds
+const HEARTBEAT_INTERVAL_MS = 45 * 1000;  // Optimized heartbeat interval (45s) for 100,000+ students
 
 export function usePresence(token: string | null) {
   const lastActiveRef = useRef<number>(Date.now());
